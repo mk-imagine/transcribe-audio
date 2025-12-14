@@ -1,0 +1,84 @@
+# System files
+.DS_Store
+
+# VS Code
+.history
+.vscode
+
+# Logs
+/logs
+
+# .env
+*.env
+
+# Virtual Environment
+venv/
+.conda_config
+
+# Python
+.mypy_cache/
+
+# Misc
+.Rhistory
+~$*.pptx
+
+## Core latex/pdflatex auxiliary files:
+*.aux
+*.lof
+*.log
+*.lot
+*.fls
+*.out
+*.toc
+*.fmt
+*.fot
+*.cb
+*.cb2
+.*.lb
+*.bcf
+*.run.xml
+*.bbl
+*.blg
+
+## Build tool auxiliary files:
+*.fdb_latexmk
+*.synctex
+*.synctex(busy)
+*.synctex.gz
+*.synctex.gz(busy)
+*.pdfsync
+*.bbl-SAVE-ERROR
+*.bcf-SAVE-ERROR
+
+**/chunks/
+
+# Data
+*.dill
+*.pt
+~$*.xlsx
+*.pkl
+/data
+/logs
+*/wandb
+
+# HTML Visualizations
+viz_html/
+
+# Archives
+*.tar.gz
+
+# Jupyter Notebook
+/.ipynb_checkpoints
+__pycache__/
+
+# Document Assets
+**/Logo Assets
+**/References and Reading
+**/EDM-template*
+
+# Database files
+*.db
+
+# Misc
+gemini_analyze/
+plots/
