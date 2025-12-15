@@ -1,20 +1,21 @@
 import argparse
 import torch
 import json
+import re
 import subprocess
 import os
 import logging
-import functools
 from pathlib import Path
 from typing import List, Dict, Optional, Union
 from transformers import pipeline, AutoTokenizer, AutoModelForTokenClassification
 from pyannote.audio import Pipeline
+import functools
 
 # --- FIX: Suppress Hugging Face generation config warnings ---
 from transformers import logging as hf_logging
 hf_logging.set_verbosity_error()
 
-# --- Import Pyannote classes explicitly to whitelist them (PyTorch 2.6 security) ---
+# --- Import Pyannote classes explicitly to whitelist them ---
 try:
     from pyannote.audio.core.task import Specifications, Problem
 except ImportError:
@@ -48,12 +49,16 @@ class AudioHandler:
         if end_time:
             command.extend(["-to", str(end_time)])
         
+        # Use pcm_s16le for compatibility
         command.extend(["-c:a", "pcm_s16le", str(temp_path)])
         
         try:
             subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            
+            # --- FIX: Verify the file actually has content ---
             if not temp_path.exists() or temp_path.stat().st_size < 1000:
-                raise RuntimeError("FFmpeg created an empty/invalid file.")
+                raise RuntimeError(f"FFmpeg created an empty or invalid file. Check if start_time {start_time} is beyond the audio duration.")
+                
             self.temp_files.append(temp_path)
             return temp_path
         except subprocess.CalledProcessError:
@@ -116,28 +121,55 @@ class Transcriber:
         self._load_pipeline()
 
     def _load_pipeline(self):
-        logger.info(f"Loading ASR Model: {self.model_name} on {self.device}")
+        # Force CPU for ASR if using MPS to avoid chunking crashes
+        run_device = self.device
+        if str(self.device) == "mps":
+            logger.warning("Apple Silicon (MPS) detected: Forcing ASR to run on CPU to avoid chunking crashes.")
+            run_device = "cpu"
+
+        logger.info(f"Loading ASR Model: {self.model_name} on {run_device}")
+        
         self.pipe = pipeline(
             "automatic-speech-recognition",
             model=self.model_name,
-            device=self.device,
-            chunk_length_s=30, # Standard chunking works fine on CUDA
+            device=run_device,
+            chunk_length_s=30,
             return_timestamps=True
         )
 
     def transcribe(self, audio_path: Union[str, Path]) -> List[Dict]:
         logger.info(f"Transcribing audio file...")
+        
+        # FIX: "word" timestamps are more stable with CrisperWhisper
+        # FIX: condition_on_prev_tokens=False prevents crash on independent chunks
+        gen_kwargs = {
+            "language": "en",
+            "condition_on_prev_tokens": False
+        }
+
         try:
-            # Explicit language prevents warnings; return_timestamps=True is standard
             result = self.pipe(
                 str(audio_path), 
-                return_timestamps=True, 
-                generate_kwargs={"language": "en", "task": "transcribe"}
+                return_timestamps="word", 
+                generate_kwargs=gen_kwargs
             )
             return result.get("chunks", [])
+            
         except Exception as e:
             logger.error(f"Transcription failed: {e}")
-            raise e
+            logger.info("Attempting fallback with standard timestamp mode...")
+            
+            # Last resort fallback
+            try:
+                result = self.pipe(
+                    str(audio_path), 
+                    return_timestamps=True, 
+                    generate_kwargs=gen_kwargs
+                )
+                return result.get("chunks", [])
+            except Exception as e2:
+                logger.error(f"Fallback also failed: {e2}")
+                raise e2
 
 class Diarizer:
     def __init__(self, auth_token: Optional[str], device: Union[str, torch.device]):
@@ -152,13 +184,12 @@ class Diarizer:
 
         logger.info("Loading Diarization Pipeline (pyannote/speaker-diarization-3.1)...")
         
-        # Security whitelist for PyTorch 2.6+
         safe_globals = [torch.torch_version.TorchVersion]
         if Specifications: safe_globals.append(Specifications)
         if Problem: safe_globals.append(Problem)
         torch.serialization.add_safe_globals(safe_globals)
 
-        # Temporary patch to force weights_only=False for trusted HF models
+        # Monkeypatch torch.load
         original_load = torch.load
         def safe_load(*args, **kwargs):
             if 'weights_only' in kwargs: del kwargs['weights_only']
@@ -167,6 +198,7 @@ class Diarizer:
 
         try:
             target_device = torch.device(self.device) if isinstance(self.device, str) else self.device
+            
             try:
                 self.pipeline = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-3.1",
@@ -174,13 +206,14 @@ class Diarizer:
                 ).to(target_device)
             except Exception as e:
                 if "403" in str(e):
-                    logger.error("Hugging Face 403 Error: Check your token permissions or accept the license at https://hf.co/pyannote/speaker-diarization-3.1")
+                    logger.error("Hugging Face 403 Error: Please accept the license at https://hf.co/pyannote/speaker-diarization-3.1")
                     raise e
                 logger.info(f"Retrying with 'use_auth_token'...")
                 self.pipeline = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-3.1",
                     use_auth_token=self.auth_token
                 ).to(target_device)
+
         except Exception as e:
             logger.error(f"Failed to load Diarization pipeline: {e}")
             self.pipeline = None
@@ -216,16 +249,16 @@ class TranscriptionOrchestrator:
             self.diarizer.load()
 
     def _get_device(self) -> str:
-        # Prioritize CUDA for cluster usage
-        if torch.cuda.is_available():
-            logger.info("Using CUDA device")
-            return "cuda"
-        elif torch.backends.mps.is_available():
-            logger.info("Using MPS device")
-            return "mps"
-        else:
-            logger.info("Using CPU")
-            return "cpu"
+        try:
+            if torch.accelerator.is_available():
+                device = torch.accelerator.current_accelerator()
+                logger.info(f"Global accelerator detected: {device}")
+                return device
+        except AttributeError:
+            pass
+        if torch.cuda.is_available(): return "cuda"
+        elif torch.backends.mps.is_available(): return "mps"
+        else: return "cpu"
 
     def _assign_speaker(self, start: float, end: float, diarization_segments: List[Dict]) -> str:
         if not diarization_segments: return "Unknown"
@@ -259,11 +292,12 @@ class TranscriptionOrchestrator:
 
             for chunk in raw_chunks:
                 raw_text = chunk["text"]
-                # Standard pipeline returns (start, end) tuple or list
+                # Handle word-level timestamps (dict) vs standard timestamps (list)
                 timestamp = chunk.get("timestamp")
-                if timestamp and len(timestamp) == 2:
+                if isinstance(timestamp, tuple) or isinstance(timestamp, list):
                     start, end = timestamp
                 else:
+                    # Fallback if timestamp is missing or malformed
                     start, end = 0.0, 0.0
 
                 cleaned_text = self.cleaner.clean(raw_text)
@@ -297,16 +331,16 @@ class TranscriptionOrchestrator:
         logger.info(f"Processing complete. Results saved to: {txt_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Cluster Speech-to-Text Pipeline")
+    parser = argparse.ArgumentParser(description="OOP Speech-to-Text Pipeline (CUDA/MPS/CPU)")
     parser.add_argument("-i", "--input_path", type=str, required=True, help="Path to input audio file")
-    parser.add_argument("-o", "--output_dir", type=str, required=True, help="Directory to save outputs")
+    parser.add_argument("-o", "--output_dir", type=str, default="./", help="Directory to save outputs")
     parser.add_argument("--model", type=str, default="unsloth/CrisperWhisper", help="HuggingFace ASR model name")
     parser.add_argument("--hf_token", type=str, default=None, help="Hugging Face Token")
     parser.add_argument("--no_diarize", action="store_true", help="Disable speaker diarization")
     parser.add_argument("--no_timestamps", action="store_true", help="Exclude timestamps in text output")
-    parser.add_argument("--clean_mode", type=str, choices=["none", "basic", "intelligent"], default="none")
-    parser.add_argument("--start_time", type=str, default=None, help="Start time")
-    parser.add_argument("--end_time", type=str, default=None, help="End time")
+    parser.add_argument("--clean_mode", type=str, choices=["none", "basic", "intelligent"], default="none", help="Level of disfluency removal")
+    parser.add_argument("--start_time", type=str, default=None, help="Start time (e.g., 00:05:00 or 300)")
+    parser.add_argument("--end_time", type=str, default=None, help="End time (e.g., 00:10:00 or 600)")
     
     args = parser.parse_args()
     orchestrator = TranscriptionOrchestrator(args)
