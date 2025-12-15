@@ -5,6 +5,7 @@ import subprocess
 import os
 import logging
 import functools
+import librosa
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import List, Dict, Optional, Union
@@ -153,15 +154,91 @@ class Transcriber:
 
     def transcribe(self, audio_path: Union[str, Path]) -> List[Dict]:
         logger.info(f"Transcribing audio file...")
+
+        # --- DEBUG: Check audio file ---
         try:
-            # --- FIX: Pass kwargs explicitily ---
-            # Even if the patch above fails, these kwargs force the pipeline
-            # to disable the buggy fallback logic during generation.
+            audio_data, sr = librosa.load(str(audio_path), sr=16000)
+            duration = len(audio_data) / sr
+            logger.info(f"Audio loaded: duration={duration:.2f}s, samples={len(audio_data)}, sample_rate={sr}")
+
+            if len(audio_data) == 0:
+                logger.error("Audio file is empty!")
+                return []
+
+            if duration < 0.1:
+                logger.warning(f"Audio is very short ({duration:.2f}s), may cause issues")
+
+        except Exception as e:
+            logger.error(f"Failed to load audio for validation: {e}")
+            # Continue anyway, let the pipeline try
+
+        # For long audio files, process in segments to identify problematic chunks
+        SEGMENT_SIZE = 300  # 5 minutes in seconds
+
+        try:
+            # If audio is short, process all at once
+            if duration <= SEGMENT_SIZE:
+                return self._transcribe_segment(str(audio_path), 0, duration)
+
+            # For long audio, process in segments
+            logger.info(f"Audio is {duration:.1f}s long. Processing in {SEGMENT_SIZE}s segments...")
+            all_chunks = []
+
+            for start_time in range(0, int(duration), SEGMENT_SIZE):
+                end_time = min(start_time + SEGMENT_SIZE, duration)
+                logger.info(f"Processing segment: {start_time}s - {end_time}s ({start_time/60:.1f}min - {end_time/60:.1f}min)")
+
+                try:
+                    chunks = self._transcribe_segment(str(audio_path), start_time, end_time)
+                    # Adjust timestamps to absolute time
+                    for chunk in chunks:
+                        if "timestamp" in chunk and chunk["timestamp"]:
+                            ts = chunk["timestamp"]
+                            if isinstance(ts, (list, tuple)) and len(ts) == 2:
+                                chunk["timestamp"] = (ts[0] + start_time, ts[1] + start_time)
+                    all_chunks.extend(chunks)
+                    logger.info(f"✓ Segment {start_time}s - {end_time}s completed ({len(chunks)} chunks)")
+                except IndexError as e:
+                    logger.error(f"✗ IndexError at segment {start_time}s - {end_time}s ({start_time/60:.1f}min - {end_time/60:.1f}min): {e}")
+                    logger.error("Skipping this segment and continuing...")
+                    # Insert error placeholder in transcript
+                    all_chunks.append({
+                        "timestamp": (start_time, end_time),
+                        "text": f"[ERROR: Transcription failed for this segment due to IndexError. Missing audio from {start_time}s to {end_time}s ({start_time/60:.1f}min - {end_time/60:.1f}min)]"
+                    })
+                    continue
+                except Exception as e:
+                    logger.error(f"✗ Error at segment {start_time}s - {end_time}s: {e}")
+                    logger.error("Skipping this segment and continuing...")
+                    # Insert error placeholder in transcript
+                    all_chunks.append({
+                        "timestamp": (start_time, end_time),
+                        "text": f"[ERROR: Transcription failed for this segment: {str(e)[:100]}. Missing audio from {start_time}s to {end_time}s ({start_time/60:.1f}min - {end_time/60:.1f}min)]"
+                    })
+                    continue
+
+            return all_chunks
+
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            raise e
+
+    def _transcribe_segment(self, audio_path: str, start_time: float, end_time: float) -> List[Dict]:
+        """Transcribe a specific segment of audio"""
+        # Load only the specific segment
+        audio_data, sr = librosa.load(audio_path, sr=16000, offset=start_time, duration=end_time - start_time)
+
+        if len(audio_data) == 0:
+            logger.warning(f"Segment {start_time}s-{end_time}s is empty")
+            return []
+
+        try:
+            # --- FIX: Pass kwargs explicitly ---
             result = self.pipe(
-                str(audio_path), 
-                return_timestamps=True, 
+                audio_data,
+                return_timestamps=True,
                 generate_kwargs={
-                    "language": "en", 
+                    "language": "en",
                     "task": "transcribe",
                     "condition_on_prev_tokens": False,
                     "compression_ratio_threshold": None,
@@ -171,8 +248,8 @@ class Transcriber:
                 }
             )
             return result.get("chunks", [])
-        except Exception as e:
-            logger.error(f"Transcription failed: {e}")
+        except IndexError as e:
+            # Re-raise so the caller can log which segment failed
             raise e
 
 class Diarizer:
