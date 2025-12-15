@@ -157,28 +157,25 @@ class Transcriber:
 
         # --- DEBUG: Check audio file ---
         try:
-            audio_data, sr = librosa.load(str(audio_path), sr=16000)
-            duration = len(audio_data) / sr
-            logger.info(f"Audio loaded: duration={duration:.2f}s, samples={len(audio_data)}, sample_rate={sr}")
+            duration = librosa.get_duration(path=str(audio_path))
+            logger.info(f"Audio duration: {duration:.2f}s")
 
-            if len(audio_data) == 0:
+            if duration == 0:
                 logger.error("Audio file is empty!")
                 return []
-
-            if duration < 0.1:
-                logger.warning(f"Audio is very short ({duration:.2f}s), may cause issues")
 
         except Exception as e:
             logger.error(f"Failed to load audio for validation: {e}")
             # Continue anyway, let the pipeline try
+            duration = 0
 
         # For long audio files, process in segments to identify problematic chunks
         SEGMENT_SIZE = 300  # 5 minutes in seconds
 
         try:
-            # If audio is short, process all at once
-            if duration <= SEGMENT_SIZE:
-                return self._transcribe_segment(str(audio_path), 0, duration)
+            # If we couldn't get duration, or it's short, just try processing normally
+            if duration > 0 and duration <= SEGMENT_SIZE:
+                return self._transcribe_segment(str(audio_path), 0, duration if duration else None)
 
             # For long audio, process in segments
             logger.info(f"Audio is {duration:.1f}s long. Processing in {SEGMENT_SIZE}s segments...")
@@ -191,11 +188,19 @@ class Transcriber:
                 try:
                     chunks = self._transcribe_segment(str(audio_path), start_time, end_time)
                     # Adjust timestamps to absolute time
+                    none_count = 0
                     for chunk in chunks:
                         if "timestamp" in chunk and chunk["timestamp"]:
                             ts = chunk["timestamp"]
                             if isinstance(ts, (list, tuple)) and len(ts) == 2:
-                                chunk["timestamp"] = (ts[0] + start_time, ts[1] + start_time)
+                                # Handle None values in timestamps
+                                if ts[0] is None or ts[1] is None:
+                                    none_count += 1
+                                ts_start = (ts[0] + start_time) if ts[0] is not None else start_time
+                                ts_end = (ts[1] + start_time) if ts[1] is not None else end_time
+                                chunk["timestamp"] = (ts_start, ts_end)
+                    if none_count > 0:
+                        logger.warning(f"  ⚠ {none_count} chunks had None timestamps, using segment boundaries as fallback")
                     all_chunks.extend(chunks)
                     logger.info(f"✓ Segment {start_time}s - {end_time}s completed ({len(chunks)} chunks)")
                 except IndexError as e:
