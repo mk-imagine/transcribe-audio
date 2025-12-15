@@ -6,7 +6,7 @@ CLEAN_MODE="none"
 START_TIME=""
 END_TIME=""
 EXTRA_FLAGS=""
-OUTPUT_DIR="./"
+OUTPUT_DIR="./transcripts"
 
 # Help Function
 usage() {

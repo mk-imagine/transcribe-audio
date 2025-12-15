@@ -3,9 +3,11 @@ import torch
 import json
 import subprocess
 import os
+import tempfile
+import soundfile as sf
 import logging
-import functools
 import librosa
+import re
 from dotenv import load_dotenv
 from pathlib import Path
 from typing import List, Dict, Optional, Union
@@ -141,16 +143,6 @@ class Transcriber:
             stride_length_s=5,
             return_timestamps=True
         )
-        
-        # --- Stability Patch (Nuclear Option) ---
-        # We try to patch the model directly, but we don't rely on it.
-        # We will ALSO pass these parameters in 'transcribe' below.
-        if hasattr(self.pipe.model, "generation_config"):
-            self.pipe.model.generation_config.condition_on_prev_tokens = False
-            # These disable the "fallback" logic that crashes on CPU
-            self.pipe.model.generation_config.compression_ratio_threshold = None
-            self.pipe.model.generation_config.logprob_threshold = None
-            self.pipe.model.generation_config.no_speech_threshold = None
 
     def transcribe(self, audio_path: Union[str, Path]) -> List[Dict]:
         logger.info(f"Transcribing audio file...")
@@ -200,7 +192,7 @@ class Transcriber:
                                 ts_end = (ts[1] + start_time) if ts[1] is not None else end_time
                                 chunk["timestamp"] = (ts_start, ts_end)
                     if none_count > 0:
-                        logger.warning(f"  ⚠ {none_count} chunks had None timestamps, using segment boundaries as fallback")
+                        logger.warning(f"  ⚠ {none_count} chunks had None timestamps, using segment boundaries as fallback.  The timestamp: {ts}")
                     all_chunks.extend(chunks)
                     logger.info(f"✓ Segment {start_time}s - {end_time}s completed ({len(chunks)} chunks)")
                 except IndexError as e:
@@ -229,7 +221,7 @@ class Transcriber:
             raise e
 
     def _transcribe_segment(self, audio_path: str, start_time: float, end_time: float) -> List[Dict]:
-        """Transcribe a specific segment of audio"""
+
         # Load only the specific segment
         audio_data, sr = librosa.load(audio_path, sr=16000, offset=start_time, duration=end_time - start_time)
 
@@ -237,25 +229,51 @@ class Transcriber:
             logger.warning(f"Segment {start_time}s-{end_time}s is empty")
             return []
 
+        # Save to temporary WAV file - Whisper works better with file paths than raw audio
+        temp_file = None
         try:
-            # --- FIX: Pass kwargs explicitly ---
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as f:
+                temp_file = f.name
+                sf.write(temp_file, audio_data, sr)
+
+            # Pass file path to pipeline instead of raw audio
+            # Use minimal generate_kwargs - let Whisper use its defaults
             result = self.pipe(
-                audio_data,
+                temp_file,
                 return_timestamps=True,
                 generate_kwargs={
                     "language": "en",
-                    "task": "transcribe",
-                    "condition_on_prev_tokens": False,
-                    "compression_ratio_threshold": None,
-                    "logprob_threshold": None,
-                    "no_speech_threshold": None,
-                    "temperature": 0.0
+                    "task": "transcribe"
                 }
             )
-            return result.get("chunks", [])
+
+            # Debug: Log what we got back
+            logger.info(f"  Pipeline result keys: {result.keys() if isinstance(result, dict) else type(result)}")
+            if isinstance(result, dict) and "text" in result:
+                logger.info(f"  Got text (length={len(result['text'])}): {result['text'][:100]}...")
+
+            chunks = result.get("chunks", [])
+
+            # If no chunks but we have text, create a single chunk
+            if not chunks and "text" in result and result["text"].strip():
+                logger.warning(f"  No chunks returned, but got text. Creating single chunk.")
+                chunks = [{
+                    "timestamp": (0.0, end_time - start_time),
+                    "text": result["text"]
+                }]
+
+            logger.info(f"  Returning {len(chunks)} chunks")
+            return chunks
         except IndexError as e:
             # Re-raise so the caller can log which segment failed
             raise e
+        finally:
+            # Clean up temp file
+            if temp_file and os.path.exists(temp_file):
+                try:
+                    os.unlink(temp_file)
+                except:
+                    pass  # Ignore cleanup errors
 
 class Diarizer:
     def __init__(self, auth_token: Optional[str], device: Union[str, torch.device]):
@@ -285,7 +303,7 @@ class Diarizer:
             target_device = torch.device(self.device) if isinstance(self.device, str) else self.device
             try:
                 self.pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-3.1",
+                    "pyannote/speaker-diarization-community-1",
                     token=self.auth_token 
                 ).to(target_device)
             except Exception as e:
@@ -294,7 +312,7 @@ class Diarizer:
                     raise e
                 logger.info(f"Retrying with 'use_auth_token'...")
                 self.pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-3.1",
+                    "pyannote/speaker-diarization-community-1",
                     use_auth_token=self.auth_token
                 ).to(target_device)
         except Exception as e:
@@ -309,10 +327,17 @@ class Diarizer:
         segments = []
         try:
             diarization = self.pipeline(str(audio_path))
-            for turn, _, speaker in diarization.itertracks(yield_label=True):
+            logger.info(f"Diarization type: {type(diarization)}")
+            
+            for turn, speaker in diarization.speaker_diarization:
                 segments.append({"start": turn.start, "end": turn.end, "speaker": speaker})
+
+            logger.info(f"Found {len(segments)} speaker segments")
+
         except Exception as e:
-            logger.error(f"Diarization runtime error: {e}")
+            logger.error(f"Diarization error: {e}")
+            logger.error(f"Diarization object type: {type(diarization)}")
+            logger.error(f"Available methods: {[attr for attr in dir(diarization) if not attr.startswith('_')]}")
         return segments
 
 class TranscriptionOrchestrator:
@@ -335,11 +360,12 @@ class TranscriptionOrchestrator:
         if torch.cuda.is_available():
             logger.info("Using CUDA device")
             return "cuda"
-        elif torch.backends.mps.is_available():
-            logger.info("Using MPS device")
-            return "mps"
+        # TEMPORARILY DISABLE MPS - has repetition bugs with Whisper
+        # elif torch.backends.mps.is_available():
+        #     logger.info("Using MPS device")
+        #     return "mps"
         else:
-            logger.info("Using CPU")
+            logger.info("Using CPU (MPS disabled due to Whisper bugs)")
             return "cpu"
 
     def _assign_speaker(self, start: float, end: float, diarization_segments: List[Dict]) -> str:
@@ -396,6 +422,9 @@ class TranscriptionOrchestrator:
         if self.args.start_time:
             base_name += f"_seg_{self.args.start_time.replace(':', '')}"
         
+        if self.args.job_id:
+            base_name += f"_job{self.args.job_id}"
+        
         json_path = self.output_dir / f"{base_name}_data.json"
         with open(json_path, "w") as f: json.dump(data, f, indent=2)
         
@@ -421,6 +450,7 @@ def main():
     parser.add_argument("--clean_mode", type=str, choices=["none", "basic", "intelligent"], default="none")
     parser.add_argument("--start_time", type=str, default=None)
     parser.add_argument("--end_time", type=str, default=None)
+    parser.add_argument("--job_id", type=str, default=None)
     
     args = parser.parse_args()
 

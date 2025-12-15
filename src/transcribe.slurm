@@ -3,6 +3,8 @@
 #SBATCH --ntasks=1
 #SBATCH --output=./logs/transcribe_%j.log
 
+set -e
+
 echo "Running on node: $SLURMD_NODENAME"
 echo "Partition: $SLURM_JOB_PARTITION"
 
@@ -29,9 +31,22 @@ export TORCH_NUM_THREADS=$SLURM_CPUS_PER_TASK
 # $4: HF Token (Empty if using .env)
 # $5: Extra Flags (start/end times)
 
+echo "Starting job $SLURM_JOB_ID at $(date)"
+
 python -u transcribe_audio.py \
     --input_path "$1" \
     --output_dir "$2" \
     --clean_mode "$3" \
     --hf_token "$4" \
+    --job_id $SLURM_JOB_ID \
     $5
+
+exit_code=$?
+
+if [ $exit_code -ne 0 ]; then
+      echo "ERROR: Python script failed with exit code $exit_code"
+      exit $exit_code
+fi
+
+echo "Job $SLURM_JOB_ID completed at $(date)"
+exit 0
