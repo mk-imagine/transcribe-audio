@@ -5,29 +5,44 @@ import subprocess
 import os
 import logging
 import functools
+from dotenv import load_dotenv
 from pathlib import Path
 from typing import List, Dict, Optional, Union
 from transformers import pipeline, AutoTokenizer, AutoModelForTokenClassification
 from pyannote.audio import Pipeline
-
-# --- FIX: Suppress Hugging Face generation config warnings ---
-from transformers import logging as hf_logging
-hf_logging.set_verbosity_error()
-
-# --- Import Pyannote classes explicitly to whitelist them (PyTorch 2.6 security) ---
 try:
     from pyannote.audio.core.task import Specifications, Problem
 except ImportError:
     Specifications = None
     Problem = None
+from transformers import logging as hf_logging
 
-# Configure logging
+hf_logging.set_verbosity_error()
+
+# --- Configuration & Setup ---
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     datefmt="%H:%M:%S"
 )
 logger = logging.getLogger(__name__)
+
+# 1. Load Environment Variables (Force Override)
+script_path = Path(__file__).resolve()
+project_root = script_path.parent.parent
+env_path = project_root / ".env"
+
+if env_path.exists():
+    load_dotenv(dotenv_path=env_path, override=True) 
+    logger.info(f"Loaded .env file from: {env_path}")
+else:
+    logger.warning(f"No .env file found at: {env_path}")
+
+# Check for Token
+if os.getenv("HF_TOKEN"):
+    logger.info("HF_TOKEN detected in environment.")
+else:
+    logger.warning("HF_TOKEN is missing from environment.")
 
 class AudioHandler:
     def __init__(self, output_dir: Path):
@@ -121,18 +136,39 @@ class Transcriber:
             "automatic-speech-recognition",
             model=self.model_name,
             device=self.device,
-            chunk_length_s=30, # Standard chunking works fine on CUDA
+            chunk_length_s=30, 
+            stride_length_s=5,
             return_timestamps=True
         )
+        
+        # --- Stability Patch (Nuclear Option) ---
+        # We try to patch the model directly, but we don't rely on it.
+        # We will ALSO pass these parameters in 'transcribe' below.
+        if hasattr(self.pipe.model, "generation_config"):
+            self.pipe.model.generation_config.condition_on_prev_tokens = False
+            # These disable the "fallback" logic that crashes on CPU
+            self.pipe.model.generation_config.compression_ratio_threshold = None
+            self.pipe.model.generation_config.logprob_threshold = None
+            self.pipe.model.generation_config.no_speech_threshold = None
 
     def transcribe(self, audio_path: Union[str, Path]) -> List[Dict]:
         logger.info(f"Transcribing audio file...")
         try:
-            # Explicit language prevents warnings; return_timestamps=True is standard
+            # --- FIX: Pass kwargs explicitily ---
+            # Even if the patch above fails, these kwargs force the pipeline
+            # to disable the buggy fallback logic during generation.
             result = self.pipe(
                 str(audio_path), 
                 return_timestamps=True, 
-                generate_kwargs={"language": "en", "task": "transcribe"}
+                generate_kwargs={
+                    "language": "en", 
+                    "task": "transcribe",
+                    "condition_on_prev_tokens": False,
+                    "compression_ratio_threshold": None,
+                    "logprob_threshold": None,
+                    "no_speech_threshold": None,
+                    "temperature": 0.0
+                }
             )
             return result.get("chunks", [])
         except Exception as e:
@@ -152,13 +188,11 @@ class Diarizer:
 
         logger.info("Loading Diarization Pipeline (pyannote/speaker-diarization-3.1)...")
         
-        # Security whitelist for PyTorch 2.6+
         safe_globals = [torch.torch_version.TorchVersion]
         if Specifications: safe_globals.append(Specifications)
         if Problem: safe_globals.append(Problem)
         torch.serialization.add_safe_globals(safe_globals)
 
-        # Temporary patch to force weights_only=False for trusted HF models
         original_load = torch.load
         def safe_load(*args, **kwargs):
             if 'weights_only' in kwargs: del kwargs['weights_only']
@@ -174,7 +208,7 @@ class Diarizer:
                 ).to(target_device)
             except Exception as e:
                 if "403" in str(e):
-                    logger.error("Hugging Face 403 Error: Check your token permissions or accept the license at https://hf.co/pyannote/speaker-diarization-3.1")
+                    logger.error("Hugging Face 403 Error: Check your token permissions.")
                     raise e
                 logger.info(f"Retrying with 'use_auth_token'...")
                 self.pipeline = Pipeline.from_pretrained(
@@ -216,7 +250,6 @@ class TranscriptionOrchestrator:
             self.diarizer.load()
 
     def _get_device(self) -> str:
-        # Prioritize CUDA for cluster usage
         if torch.cuda.is_available():
             logger.info("Using CUDA device")
             return "cuda"
@@ -259,7 +292,6 @@ class TranscriptionOrchestrator:
 
             for chunk in raw_chunks:
                 raw_text = chunk["text"]
-                # Standard pipeline returns (start, end) tuple or list
                 timestamp = chunk.get("timestamp")
                 if timestamp and len(timestamp) == 2:
                     start, end = timestamp
@@ -298,17 +330,23 @@ class TranscriptionOrchestrator:
 
 def main():
     parser = argparse.ArgumentParser(description="Cluster Speech-to-Text Pipeline")
-    parser.add_argument("-i", "--input_path", type=str, required=True, help="Path to input audio file")
-    parser.add_argument("-o", "--output_dir", type=str, required=True, help="Directory to save outputs")
-    parser.add_argument("--model", type=str, default="unsloth/CrisperWhisper", help="HuggingFace ASR model name")
-    parser.add_argument("--hf_token", type=str, default=None, help="Hugging Face Token")
-    parser.add_argument("--no_diarize", action="store_true", help="Disable speaker diarization")
-    parser.add_argument("--no_timestamps", action="store_true", help="Exclude timestamps in text output")
+    parser.add_argument("-i", "--input_path", type=str, required=True)
+    parser.add_argument("-o", "--output_dir", type=str, required=True)
+    parser.add_argument("--model", type=str, default="unsloth/CrisperWhisper")
+    parser.add_argument("--hf_token", type=str, default=None)
+    parser.add_argument("--no_diarize", action="store_true")
+    parser.add_argument("--no_timestamps", action="store_true")
     parser.add_argument("--clean_mode", type=str, choices=["none", "basic", "intelligent"], default="none")
-    parser.add_argument("--start_time", type=str, default=None, help="Start time")
-    parser.add_argument("--end_time", type=str, default=None, help="End time")
+    parser.add_argument("--start_time", type=str, default=None)
+    parser.add_argument("--end_time", type=str, default=None)
     
     args = parser.parse_args()
+
+    # --- FIX: Handle Empty Strings from Shell ---
+    # We use 'if not args.hf_token' to catch both None and empty strings ""
+    if not args.hf_token:
+        args.hf_token = os.getenv("HF_TOKEN")
+
     orchestrator = TranscriptionOrchestrator(args)
     orchestrator.run()
 
