@@ -82,3 +82,7 @@ __pycache__/
 # Misc
 gemini_analyze/
 plots/
+
+# Context files
+CLAUDE.md
+GEMINI.md
