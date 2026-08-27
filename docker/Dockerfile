@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1
 
-# Verified on ubuntu-gpu (RTX 3070, driver 580.173.02):
-#   Python 3.12.3 / torch 2.11.0+cu128 / CUDA 12.8 / torchaudio present.
-# sm_86 (Ampere) is covered by the cu128 build.
-ARG BASE_IMAGE=pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime
+# CUDA 13 base, chosen to match torchcodec's PyPI wheels (see requirements.txt).
+# ubuntu-gpu runs driver 580.173.02, above CUDA 13.0's 580.65 floor, and the
+# RTX 3070 is sm_86 (Ampere) which CUDA 13 still supports -- it dropped
+# Maxwell/Pascal/Volta only.
+ARG BASE_IMAGE=pytorch/pytorch:2.11.0-cuda13.0-cudnn9-runtime
 FROM ${BASE_IMAGE}
 
 ARG UID=1000
@@ -50,8 +51,14 @@ for pkg in ("torch", "torchaudio", "torchvision"):
 PY
 
 COPY docker/requirements.txt /tmp/requirements.txt
-RUN pip install --no-cache-dir -c /tmp/torch-constraints.txt -r /tmp/requirements.txt \
-    && python -c "import torch; assert torch.version.cuda, 'CUDA torch was replaced by a CPU build'"
+RUN pip install --no-cache-dir -c /tmp/torch-constraints.txt -r /tmp/requirements.txt
+
+# Fail the build, not a two-hour transcription, if the native stack is wrong.
+# torchcodec declares no torch dependency, so a CUDA-major mismatch surfaces
+# only when its .so is actually dlopen'd.
+RUN python -c "import torch, torchcodec, pyannote.audio, transformers, librosa, soundfile, peft; \
+assert torch.version.cuda, 'CUDA torch was replaced by a CPU build'; \
+print('torch', torch.__version__, '| torchcodec', torchcodec.__version__, '| pyannote.audio', pyannote.audio.__version__)"
 
 # Run as the host user so bind-mounted transcripts/ are not written as root.
 # Ubuntu 24.04 base images already ship a uid 1000, so both lookups are guarded.

@@ -14,6 +14,11 @@ huggingface_hub>=0.34
 # speaker-diarization-community-1 requires the pyannote.audio 4.x runtime.
 pyannote.audio>=4.0,<5
 
+# pyannote 4.x decodes audio through torchcodec. torchcodec declares NO torch
+# dependency and its PyPI wheels are built against CUDA 13, so the base image
+# must be a CUDA 13 one or its .so fails to dlopen libnvrtc.so.13.
+torchcodec>=0.16
+
 # --- Audio I/O ---
 librosa>=0.10
 soundfile>=0.12

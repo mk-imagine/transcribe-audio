@@ -1,16 +1,16 @@
 # GPU Container (ubuntu-gpu)
 
 Runs the transcription pipeline on the local GPU box (`ubuntu-gpu`, RTX 3070 8 GB,
-driver 580.173.02) without installing anything on the host beyond Docker, which is
+driver 580.173.02, above CUDA 13.0's 580.65 floor) without installing anything on the host beyond Docker, which is
 already present along with `nvidia-container-toolkit`.
 
 ## Image
 
 | | |
 |---|---|
-| Base | `pytorch/pytorch:2.11.0-cuda12.8-cudnn9-runtime` |
+| Base | `pytorch/pytorch:2.11.0-cuda13.0-cudnn9-runtime` |
 | Python | 3.12.3 |
-| Torch | 2.11.0+cu128 (CUDA 12.8, `torchaudio` included) |
+| Torch | 2.11.0 (CUDA 13.0, `torchaudio` included) |
 | System pkgs | `ffmpeg` (segment extraction), `libsndfile1` (soundfile backend) |
 | Runs as | host uid/gid (1000:1000 by default) so outputs are not root-owned |
 | Python env | `/opt/venv`, created with `--system-site-packages` |
