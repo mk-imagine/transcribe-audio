@@ -1,0 +1,23 @@
+# Python dependencies for the CUDA transcription container.
+#
+# torch / torchaudio are NOT listed here: they ship in the pytorch base image
+# and are pinned at build time via a generated constraints file so no
+# transitive dependency can silently swap in a different (CPU-only) build.
+
+# --- ASR / NLP ---
+transformers>=4.57,<5
+accelerate>=1.0
+peft>=0.14                # IBM Granite Speech ships its ASR head as a LoRA adapter
+huggingface_hub>=0.34
+
+# --- Diarization ---
+# speaker-diarization-community-1 requires the pyannote.audio 4.x runtime.
+pyannote.audio>=4.0,<5
+
+# --- Audio I/O ---
+librosa>=0.10
+soundfile>=0.12
+numpy>=1.26
+
+# --- Misc ---
+python-dotenv>=1.0

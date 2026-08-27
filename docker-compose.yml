@@ -1,0 +1,38 @@
+# GPU transcription container for ubuntu-gpu (RTX 3070, 8 GB).
+#
+#   docker compose build
+#   docker compose run --rm transcribe -i /data/meeting.m4a -o /transcripts
+#
+services:
+  transcribe:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    image: transcribe-audio:cuda12.8
+    gpus: all
+
+    # HF_TOKEN for the pyannote diarization pipeline. The script also reads
+    # /app/.env, but keeping the token in the environment avoids baking it
+    # into the image or a bind mount.
+    env_file:
+      - path: .env
+        required: false
+
+    volumes:
+      # Audio in, transcripts out. Both are gitignored on the host.
+      - ./data:/data
+      - ./transcripts:/transcripts
+      # Model weights: CrisperWhisper is ~3 GB and Granite Speech much larger,
+      # so persist the HF cache across runs rather than redownloading.
+      - model-cache:/cache
+
+    working_dir: /app
+    # Interactive by default so Ctrl-C stops a long transcription cleanly.
+    stdin_open: true
+    tty: true
+
+volumes:
+  model-cache:

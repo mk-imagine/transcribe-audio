@@ -20,7 +20,13 @@ except ImportError:
     Specifications = None   # type: ignore
     Problem = None          # type: ignore
 from transformers import logging as hf_logging
-import mlx_whisper
+
+# mlx_whisper is Apple-Silicon only; import lazily so this module loads on
+# Linux/CUDA hosts where the MLX backend is unavailable.
+try:
+    import mlx_whisper  # type: ignore
+except ImportError:
+    mlx_whisper = None  # type: ignore
 
 hf_logging.set_verbosity_error()
 
@@ -397,6 +403,13 @@ class MLXCrisperWhisperTranscriber(BaseTranscriber):
             logger.info(f"Using MLX model: {self.mlx_model}")
         else:
             self.mlx_model = model_name
+
+        if mlx_whisper is None:
+            raise RuntimeError(
+                "mlx_whisper is not installed. The MLX CrisperWhisper backend "
+                "requires Apple Silicon; use --model unsloth/CrisperWhisper for "
+                "the transformers/CUDA backend."
+            )
 
         logger.info(f"MLX CrisperWhisper initialized")
 
