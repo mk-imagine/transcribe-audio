@@ -18,12 +18,23 @@ ENV DEBIAN_FRONTEND=noninteractive \
     NUMBA_CACHE_DIR=/cache/numba \
     MPLCONFIGDIR=/cache/matplotlib
 
-# ffmpeg      - AudioHandler.prepare_segment() shells out to it for --start_time/--end_time
-# libsndfile1 - soundfile backend
+# ffmpeg       - AudioHandler.prepare_segment() shells out to it for --start_time/--end_time
+# libsndfile1  - soundfile backend
+# python3-venv - the base image's Python is the distro one; see the venv note below
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
         libsndfile1 \
+        python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# The base image installs torch into the *distro* Python, which Ubuntu marks
+# PEP 668 externally-managed, so pip refuses to install into it. Rather than
+# override that marker, layer a venv on top of the system site-packages: our
+# dependencies get their own prefix while torch/torchaudio stay visible from
+# /usr/local/lib/python3.12/dist-packages.
+ENV VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH
+RUN python3 -m venv --system-site-packages "${VIRTUAL_ENV}"
 
 # Freeze the torch stack that ships in the base image before installing anything
 # else. Without this, resolving pyannote/transformers can silently pull a

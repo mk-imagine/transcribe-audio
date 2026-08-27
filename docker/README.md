@@ -13,6 +13,12 @@ already present along with `nvidia-container-toolkit`.
 | Torch | 2.11.0+cu128 (CUDA 12.8, `torchaudio` included) |
 | System pkgs | `ffmpeg` (segment extraction), `libsndfile1` (soundfile backend) |
 | Runs as | host uid/gid (1000:1000 by default) so outputs are not root-owned |
+| Python env | `/opt/venv`, created with `--system-site-packages` |
+
+The base image puts torch in the distro Python, which Ubuntu marks PEP 668
+externally-managed. The image therefore layers a venv on top of the system
+site-packages instead of overriding that marker: project dependencies get their
+own prefix while torch/torchaudio remain visible from the base image.
 
 The torch stack from the base image is frozen into a pip constraints file before
 the other dependencies install, so nothing can silently replace the CUDA build
