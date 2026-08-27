@@ -1,5 +1,24 @@
 # Plan: Add Word-Level Timestamps to Granite Transcriber
 
+> ## ⚠️ SUPERSEDED — do not implement
+>
+> **Superseded 2026-08-27 by [`pipeline_plan.md`](pipeline_plan.md).** Retained for provenance.
+>
+> This plan proposed extracting word timestamps from Granite by identifying monotonic attention
+> heads and training an auxiliary transformer on LibriSpeech alignments — GPU training, a
+> ground-truth alignment dataset, and an 11–21 hour estimate that was optimistic. It also
+> predicted **word start times only**, with no end times.
+>
+> **It is unnecessary.** `ibm-granite/granite-speech-4.1-2b-plus` (released 2026-04-28, *after*
+> this plan was written) provides word-level timestamps natively as `[T:N]` centisecond tags,
+> plus explicit `_` silence tokens carrying their own timestamps. No training, no dataset.
+>
+> The one durable insight here is that Granite's conformer encoder is CTC-trained against a
+> 42-character output space, so its own CTC posteriors could drive forced alignment without any
+> auxiliary model. That route was also dropped — it is Granite-specific, and the new pipeline is
+> model-agnostic by design (see decision D2). `CrisperWhisperModel.forced_align()` fills the
+> same gap for any model.
+
 ## Summary
 Implement word-level timestamp support for IBM Granite Speech models using **attention-based temporal alignment**. This method extracts word-level timestamps from Granite's internal attention patterns by training a small auxiliary model on attention matrix activations.
 
