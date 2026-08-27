@@ -86,3 +86,6 @@ plots/
 # Context files
 CLAUDE.md
 GEMINI.md
+
+# Private Data
+transcripts/
