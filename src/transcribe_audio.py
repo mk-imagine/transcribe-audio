@@ -241,11 +241,19 @@ class WhisperTranscriber(BaseTranscriber):
 
     def _load_pipeline(self):
         # whisper-large-v3 derivatives are ~1.55B params, which is ~6.2GB in
-        # float32 -- more than an 8GB card can host alongside the diarizer.
-        # Half precision halves that to ~3.1GB; CPU keeps float32 since fp16
-        # matmuls there are slow and often unimplemented.
+        # float32 -- more than a small card can host alongside the diarizer.
+        # Half precision halves that to ~3.1GB (measured); CPU keeps float32
+        # since fp16 matmuls there are slow and often unimplemented.
         device_str = str(self.device)
-        dtype = torch.float32 if device_str.startswith("cpu") else torch.float16
+        if device_str.startswith("cpu"):
+            dtype = torch.float32
+        elif device_str.startswith("cuda") and torch.cuda.is_bf16_supported():
+            # Ampere and newer: bf16 costs the same memory as fp16 but keeps
+            # fp32's exponent range, so long jobs cannot silently overflow.
+            # Matches the dtype the Granite path already uses on GPU.
+            dtype = torch.bfloat16
+        else:
+            dtype = torch.float16
         logger.info(f"Loading ASR Model: {self.model_name} on {self.device} ({dtype})")
         self.pipe = pipeline(
             "automatic-speech-recognition",
