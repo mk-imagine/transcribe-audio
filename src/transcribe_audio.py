@@ -70,7 +70,10 @@ class AudioHandler:
             return input_path
 
         safe_start = start_time.replace(':', '')
-        temp_filename = f"temp_segment_{safe_start}_{input_path.name}"
+        # The segment is always re-encoded as PCM s16le below, so it must land in
+        # a container that accepts PCM. Reusing the source suffix wrote PCM into
+        # e.g. .m4a, which the MP4 muxer rejects outright.
+        temp_filename = f"temp_segment_{safe_start}_{input_path.stem}.wav"
         temp_path = self.output_dir / temp_filename
         
         logger.info(f"Creating temporary audio segment: {start_time} to {end_time or 'EOF'}...")
@@ -82,13 +85,25 @@ class AudioHandler:
         command.extend(["-c:a", "pcm_s16le", str(temp_path)])
         
         try:
-            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+            subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
             if not temp_path.exists() or temp_path.stat().st_size < 1000:
                 raise RuntimeError("FFmpeg created an empty/invalid file.")
             self.temp_files.append(temp_path)
             return temp_path
-        except subprocess.CalledProcessError:
-            logger.error("Error creating audio segment. Ensure 'ffmpeg' is installed.")
+        except FileNotFoundError:
+            logger.error("ffmpeg not found on PATH. It is required for --start_time/--end_time.")
+            raise
+        except subprocess.CalledProcessError as exc:
+            # Previously stderr was routed into a discarded stdout, so real
+            # ffmpeg failures surfaced only as an exit code.
+            detail = (exc.stderr or "").strip().splitlines()[-8:]
+            logger.error("ffmpeg failed creating audio segment:\n%s", "\n".join(detail))
             raise
 
     def cleanup(self):
