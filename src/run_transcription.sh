@@ -8,10 +8,11 @@ END_TIME=""
 EXTRA_FLAGS=""
 OUTPUT_DIR="./transcripts"
 CONDA_ENV="audio-transcribe"
+MODEL=""
 
 # Help Function
 usage() {
-    echo "Usage: $0 -i <input_file> -o <output_dir> [-m <mode>] [-c <compute>] [-s <start_time>] [-e <end_time>] [-E <conda_env>]"
+    echo "Usage: $0 -i <input_file> -o <output_dir> [-m <mode>] [-c <compute>] [-s <start_time>] [-e <end_time>] [-E <conda_env>] [-M <model>]"
     echo "  -i : Input audio file (Required)"
     echo "  -o : Output directory"
     echo "  -m : Clean mode (raw, basic, intelligent). Default: raw/none"
@@ -20,11 +21,13 @@ usage() {
     echo "  -e : End time (e.g., 00:10:00)"
     echo "  -E : Conda env to activate. Default: audio-transcribe"
     echo "       Use audio-transcribe-crisper for CrisperWhisper models."
+    echo "  -M : ASR model. Default: the script's own default (unsloth/crisperwhisper)"
+    echo "       e.g. openai/whisper-large-v3, ibm-granite/granite-speech-3.3-8b"
     exit 1
 }
 
 # Parse Flags
-while getopts "i:o:m:c:s:e:E:h" opt; do
+while getopts "i:o:m:c:s:e:E:M:h" opt; do
     case ${opt} in
         i) AUDIO_FILE="$OPTARG" ;;
         o) OUTPUT_DIR="$OPTARG" ;;
@@ -33,6 +36,7 @@ while getopts "i:o:m:c:s:e:E:h" opt; do
         s) START_TIME="$OPTARG" ;;
         e) END_TIME="$OPTARG" ;;
         E) CONDA_ENV="$OPTARG" ;;
+        M) MODEL="$OPTARG" ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -76,11 +80,18 @@ if [ ! -z "$START_TIME" ]; then
     fi
 fi
 
+# Appended to the passthrough flags rather than added as a positional, so the
+# transcribe.slurm argument contract stays unchanged.
+if [ -n "$MODEL" ]; then
+    EXTRA_FLAGS="$EXTRA_FLAGS --model $MODEL"
+fi
+
 mkdir -p logs
 mkdir -p "$OUTPUT_DIR"
 
 # Submit
 echo "Conda environment: $CONDA_ENV"
+[ -n "$MODEL" ] && echo "Model: $MODEL"
 
 sbatch \
     --export=ALL,TRANSCRIBE_ENV="$CONDA_ENV" \
