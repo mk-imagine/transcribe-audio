@@ -240,11 +240,18 @@ class WhisperTranscriber(BaseTranscriber):
         self._load_pipeline()
 
     def _load_pipeline(self):
-        logger.info(f"Loading ASR Model: {self.model_name} on {self.device}")
+        # whisper-large-v3 derivatives are ~1.55B params, which is ~6.2GB in
+        # float32 -- more than an 8GB card can host alongside the diarizer.
+        # Half precision halves that to ~3.1GB; CPU keeps float32 since fp16
+        # matmuls there are slow and often unimplemented.
+        device_str = str(self.device)
+        dtype = torch.float32 if device_str.startswith("cpu") else torch.float16
+        logger.info(f"Loading ASR Model: {self.model_name} on {self.device} ({dtype})")
         self.pipe = pipeline(
             "automatic-speech-recognition",
             model=self.model_name,
             device=self.device,
+            torch_dtype=dtype,
             chunk_length_s=30,
             stride_length_s=5,
             return_timestamps=True
