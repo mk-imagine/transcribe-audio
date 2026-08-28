@@ -334,16 +334,17 @@ class CrisperWhisperTranscriber(WhisperTranscriber):
     Based on: https://huggingface.co/nyrahealth/CrisperWhisper
     """
 
-    def __init__(self, model_name: str, device: Union[str, torch.device]):
-        # Use nyrahealth/CrisperWhisper if user specified unsloth variant
-        # if "unsloth" in model_name.lower() and "crisper" in model_name.lower():
-        #     logger.warning(f"Converting {model_name} to nyrahealth/CrisperWhisper (recommended by model card)")
-        #     model_name = "nyrahealth/CrisperWhisper"
-
-        # Use chunk-level timestamps to avoid MPS compatibility issues with word-level timestamps
-        super().__init__(model_name, device, return_timestamps=True)
+    def __init__(self, model_name: str, device: Union[str, torch.device],
+                 return_timestamps: Union[str, bool] = "word"):
+        # Word-level is the mode CrisperWhisper is built for, and the only one
+        # that works: asking it for chunk-level timestamps makes it emit a
+        # degenerate run of "(" characters and a single (None, None) chunk,
+        # which then crashes speaker assignment. _adjust_pauses() below also
+        # expects per-word chunks. Chunk-level stays reachable via
+        # --timestamp_mode chunk for platforms that need it.
+        super().__init__(model_name, device, return_timestamps=return_timestamps)
         self.split_threshold = 0.12  # Default pause split threshold from model card
-        logger.info(f"CrisperWhisper initialized with chunk-level timestamps and pause split threshold: {self.split_threshold}s")
+        logger.info(f"CrisperWhisper initialized ({return_timestamps}-level timestamps, pause split threshold: {self.split_threshold}s)")
 
     def _transcribe_segment(self, audio_path: str, start_time: float, end_time: float) -> List[Dict]:
         """Transcribe a segment using CrisperWhisper with pause adjustment."""
@@ -607,8 +608,9 @@ class TranscriberFactory:
             logger.info("Creating MLX CrisperWhisper transcriber (Apple Silicon optimized)")
             return MLXCrisperWhisperTranscriber(model_name, device)
         elif "crisper" in model_name.lower():
-            logger.info("Creating CrisperWhisper transcriber (transformers pipeline)")
-            return CrisperWhisperTranscriber(model_name, device)
+            logger.info(f"Creating CrisperWhisper transcriber ({timestamp_mode}-level timestamps)")
+            return CrisperWhisperTranscriber(model_name, device,
+                                             return_timestamps=return_timestamps)
         else:
             logger.info(f"Creating standard Whisper transcriber ({timestamp_mode}-level timestamps)")
             return WhisperTranscriber(model_name, device, return_timestamps=return_timestamps)
