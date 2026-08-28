@@ -589,7 +589,9 @@ class GraniteTranscriber(BaseTranscriber):
 class TranscriberFactory:
     """Factory to create the appropriate transcriber based on model name"""
     @staticmethod
-    def create(model_name: str, device: Union[str, torch.device]) -> BaseTranscriber:
+    def create(model_name: str, device: Union[str, torch.device],
+               timestamp_mode: str = "word") -> BaseTranscriber:
+        return_timestamps: Union[str, bool] = "word" if timestamp_mode == "word" else True
         if "granite-speech" in model_name.lower():
             logger.info("Creating IBM Granite transcriber")
             return GraniteTranscriber(model_name, device)
@@ -600,8 +602,8 @@ class TranscriberFactory:
             logger.info("Creating CrisperWhisper transcriber (transformers pipeline)")
             return CrisperWhisperTranscriber(model_name, device)
         else:
-            logger.info("Creating standard Whisper transcriber")
-            return WhisperTranscriber(model_name, device)
+            logger.info(f"Creating standard Whisper transcriber ({timestamp_mode}-level timestamps)")
+            return WhisperTranscriber(model_name, device, return_timestamps=return_timestamps)
 
 class Diarizer:
     def __init__(self, model_name: str, auth_token: Optional[str], device: Union[str, torch.device]):
@@ -679,7 +681,9 @@ class TranscriptionOrchestrator:
         self.device = self._get_device()
         
         self.audio_handler = AudioHandler(self.output_dir)
-        self.transcriber = TranscriberFactory.create(args.model, self.device)
+        self.transcriber = TranscriberFactory.create(
+            args.model, self.device, getattr(args, "timestamp_mode", "word")
+        )
         self.cleaner = TextCleaner(args.clean_mode, self.device)
         self.diarizer = Diarizer(args.diarizer_model, args.hf_token, self.device)
         
@@ -783,6 +787,11 @@ def main():
     parser.add_argument("--hf_token", type=str, default=None)
     parser.add_argument("--no_diarize", action="store_true")
     parser.add_argument("--no_timestamps", action="store_true")
+    # Word-level timestamps require the decoder to emit per-token alignments,
+    # which needs well over 8GB of VRAM on whisper-large-v3 class models.
+    # "chunk" asks for segment-level timestamps instead and fits comfortably.
+    parser.add_argument("--timestamp_mode", type=str, choices=["word", "chunk"],
+                        default="word")
     parser.add_argument("--clean_mode", type=str, choices=["none", "basic", "intelligent"], default="none")
     parser.add_argument("--start_time", type=str, default=None)
     parser.add_argument("--end_time", type=str, default=None)
