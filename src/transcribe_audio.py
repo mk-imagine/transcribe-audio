@@ -335,7 +335,8 @@ class CrisperWhisperTranscriber(WhisperTranscriber):
     """
 
     def __init__(self, model_name: str, device: Union[str, torch.device],
-                 return_timestamps: Union[str, bool] = "word"):
+                 return_timestamps: Union[str, bool] = "word",
+                 adjust_pauses: bool = False):
         # Word-level is the mode CrisperWhisper is built for, and the only one
         # that works: asking it for chunk-level timestamps makes it emit a
         # degenerate run of "(" characters and a single (None, None) chunk,
@@ -344,17 +345,28 @@ class CrisperWhisperTranscriber(WhisperTranscriber):
         # --timestamp_mode chunk for platforms that need it.
         super().__init__(model_name, device, return_timestamps=return_timestamps)
         self.split_threshold = 0.12  # Default pause split threshold from model card
-        logger.info(f"CrisperWhisper initialized ({return_timestamps}-level timestamps, pause split threshold: {self.split_threshold}s)")
+        self.adjust_pauses = adjust_pauses
+        logger.info(
+            f"CrisperWhisper initialized ({return_timestamps}-level timestamps, "
+            f"pause adjustment: {'on' if adjust_pauses else 'off (raw timestamps)'})"
+        )
 
     def _transcribe_segment(self, audio_path: str, start_time: float, end_time: float) -> List[Dict]:
-        """Transcribe a segment using CrisperWhisper with pause adjustment."""
-        # Get chunks from parent WhisperTranscriber
+        """Transcribe a segment using CrisperWhisper."""
         chunks = super()._transcribe_segment(audio_path, start_time, end_time)
 
-        # Apply CrisperWhisper-specific pause adjustment
-        adjusted_chunks = self._adjust_pauses(chunks)
+        # Pause adjustment is a lossy transform, so it is off by default: it
+        # collapses every inter-word gap below split_threshold to zero and
+        # shortens the rest by the same amount. Measured over two ~80 min
+        # recordings that zeroed 59% of all gaps -- destroying the silence
+        # durations that sentence segmentation and hesitation analysis both
+        # read. Transcription emits raw model timestamps; anything recomputable
+        # from them belongs in a later rendering pass, which can call
+        # _adjust_pauses() itself.
+        if self.adjust_pauses:
+            return self._adjust_pauses(chunks)
 
-        return adjusted_chunks
+        return chunks
 
     def _adjust_pauses(self, chunks: List[Dict]) -> List[Dict]:
         """
@@ -599,7 +611,8 @@ class TranscriberFactory:
     """Factory to create the appropriate transcriber based on model name"""
     @staticmethod
     def create(model_name: str, device: Union[str, torch.device],
-               timestamp_mode: str = "word") -> BaseTranscriber:
+               timestamp_mode: str = "word",
+               adjust_pauses: bool = False) -> BaseTranscriber:
         return_timestamps: Union[str, bool] = "word" if timestamp_mode == "word" else True
         if "granite-speech" in model_name.lower():
             logger.info("Creating IBM Granite transcriber")
@@ -610,7 +623,8 @@ class TranscriberFactory:
         elif "crisper" in model_name.lower():
             logger.info(f"Creating CrisperWhisper transcriber ({timestamp_mode}-level timestamps)")
             return CrisperWhisperTranscriber(model_name, device,
-                                             return_timestamps=return_timestamps)
+                                             return_timestamps=return_timestamps,
+                                             adjust_pauses=adjust_pauses)
         else:
             logger.info(f"Creating standard Whisper transcriber ({timestamp_mode}-level timestamps)")
             return WhisperTranscriber(model_name, device, return_timestamps=return_timestamps)
@@ -692,7 +706,8 @@ class TranscriptionOrchestrator:
         
         self.audio_handler = AudioHandler(self.output_dir)
         self.transcriber = TranscriberFactory.create(
-            args.model, self.device, getattr(args, "timestamp_mode", "word")
+            args.model, self.device, getattr(args, "timestamp_mode", "word"),
+            getattr(args, "adjust_pauses", False)
         )
         self.cleaner = TextCleaner(args.clean_mode, self.device)
         self.diarizer = Diarizer(args.diarizer_model, args.hf_token, self.device)
@@ -802,6 +817,9 @@ def main():
     # "chunk" asks for segment-level timestamps instead and fits comfortably.
     parser.add_argument("--timestamp_mode", type=str, choices=["word", "chunk"],
                         default="word")
+    # Off by default: pause adjustment rewrites word boundaries in place and
+    # cannot be undone downstream. Transcription output stays verbatim.
+    parser.add_argument("--adjust_pauses", action="store_true")
     parser.add_argument("--clean_mode", type=str, choices=["none", "basic", "intelligent"], default="none")
     parser.add_argument("--start_time", type=str, default=None)
     parser.add_argument("--end_time", type=str, default=None)
