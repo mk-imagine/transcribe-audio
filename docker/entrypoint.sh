@@ -4,7 +4,8 @@ set -euo pipefail
 # Escape hatches for debugging the image itself.
 case "${1:-}" in
     bash|sh|shell)
-        exec /bin/bash
+        shift
+        exec /bin/bash "$@"
         ;;
     python)
         shift
