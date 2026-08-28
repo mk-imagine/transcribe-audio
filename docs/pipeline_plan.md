@@ -314,8 +314,30 @@ detector — repurposed from **deleter to tagger**.
 - **Within-turn anchors** every `--anchor-interval` seconds, snapped to the nearest sentence or
   pause boundary, so a long turn stays citable.
 - **Sentence boundary** = terminal punctuation ∨ pause > threshold ∨ speaker change.
-  Verbatim text has sparse punctuation, so the pause rule carries more weight in the coding
-  profile than the lecture one.
+
+#### Measured against real output (2026-08-28)
+
+Two ~80 min recordings, CrisperWhisper word-level timestamps on an A100, `--clean_mode none`:
+
+| Signal | Interview (14,709 w, 182 wpm) | Lecture (11,588 w, 147 wpm) |
+|---|---|---|
+| terminal punctuation | every 4.7 s | every 7.0 s |
+| pause > 0.2 s | every 2.8 s | every 2.8 s |
+| **pause > 0.3 s** | **every 5.1 s** | **every 4.5 s** |
+| pause > 0.5 s | every 14.5 s | every 12.8 s |
+| speaker change | every 43.6 s | every 60.7 s |
+
+**Punctuation is not sparse.** It alone yields a sentence every 4.7–7.0 s, so it is the primary
+signal and the pause rule supplements it — the reverse of what was assumed here previously.
+
+**Provisional default: `--pause-threshold 0.3`.** Both recordings agree closely despite
+differing genre and speech rate; 0.2 s fragments sentences, 0.5 s merges them.
+
+**Do not harden that number yet.** 59% of inter-word gaps are exactly 0.000 s in both files —
+an artifact of `_adjust_pauses` (bug 8), which collapses every gap below `split_threshold`
+(0.12 s) and shortens the rest by the same amount. The 0.3 s figure is measured against
+already-distorted data and corresponds to roughly 0.42 s of real silence. Re-derive it once
+pause adjustment moves to stage 2.
 
 All thresholds are CLI flags. Re-rendering is instant, so tune them against real transcripts
 rather than guessing up front.
@@ -512,6 +534,19 @@ Fix or delete during the rewrite; the first two are costing data today.
 5. Chunks that clean to empty are `continue`d, silently punching holes in the timeline.
 6. `_adjust_timestamps` uses absolute `end_time` as the fallback for a missing relative end.
 7. `TranscriberFactory` substring-sniffs model names; replaced by the registry.
+8. `_adjust_pauses` runs in stage 1 and is lossy. It redistributes every gap below
+   `split_threshold` (0.12 s) into the adjacent words and shortens larger gaps by the same
+   amount. Measured on two ~80 min recordings, **59% of inter-word gaps come out exactly
+   0.000 s** — destroying the pause signal stage 2's sentence rule depends on. Same defect as
+   bug 4: pure data transformation belongs in stage 2, not ahead of the write.
+9. Per-segment `librosa.load(path, offset=...)` re-decodes a compressed source from byte zero
+   for every segment, so decode cost grows quadratically with duration. Measured on the same
+   GPU at near-identical durations: 79 min of `.m4a` ran at **1.15x realtime** (91 min wall)
+   against **0.27x** for 81 min of `.wav` — a ~4x penalty from container format alone, with
+   the ASR itself never the bottleneck. Decode once into a working array, or seek with ffmpeg.
+10. The diarization log line hardcodes `pyannote/speaker-diarization-3.1` while the pipeline
+    actually loads `--diarizer_model` (default `community-1`), so logs misreport which model
+    ran — corrupting exactly the provenance §5 exists to capture.
 
 ---
 
@@ -521,7 +556,8 @@ Fix or delete during the rewrite; the first two are costing data today.
 |---|---|
 | **Granite timestamp + speaker mode combination** | Undocumented. Phase 0 question 2. |
 | **Coding margin layout** | Right-hand column vs. double-spaced. Ask the student coders. |
-| **Verbatim punctuation sparsity** | Sentence subdivision may lean mostly on pauses. Check against real output before fixing a default. |
+| **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
+| **Diarization speaker count** | 10 speakers + `Unknown` on one ~80 min interview, 4 + `Unknown` on a single-presenter lecture (427 raw segments). Looks like over-segmentation. Needs a listen against the source audio before the speaker-change boundary rule is trusted. |
 | **Diarization at turn boundaries** | Short filler tokens near a speaker change are where max-overlap assignment is noisiest; hence smoothing within pause-bounded runs. |
 | **IRB / data governance** | Interview recordings are human-subjects data and stage 1 moves them to shared cluster storage. Assumed covered by the existing protocol; flagged because this pipeline automates the transfer. |
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
