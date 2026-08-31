@@ -618,16 +618,25 @@ class GraniteTranscriber(BaseTranscriber):
         prompt_text = self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
 
         # Process audio through processor
+        # GraniteSpeechProcessor.__call__ is (text, audio, device, **kwargs) with
+        # no sampling_rate parameter -- passing one forwards it to the tokenizer,
+        # which rejects it. The waveform is already resampled to 16kHz above.
         inputs = self.processor(
             prompt_text,
             waveform,
-            sampling_rate=granite_target_sample_rate,
+            device=str(self.model.device),
             return_tensors="pt"
         ).to(self.model.device)
 
+        # Scale the token budget to the segment. A fixed 500 silently truncated
+        # every segment longer than ~90s: at the ~150-185 wpm measured on real
+        # recordings a 300s segment is ~750-925 words, well past 500 tokens.
+        segment_seconds = max(end_time - start_time, 1.0)
+        max_new_tokens = int(min(4096, max(256, segment_seconds * 6)))
+
         # Generate transcription
         with torch.no_grad():
-            generated_ids = self.model.generate(**inputs, max_new_tokens=500)
+            generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
 
         # Decode
         transcription = self.processor.batch_decode(
