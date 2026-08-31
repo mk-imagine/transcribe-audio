@@ -295,13 +295,16 @@ class WhisperTranscriber(BaseTranscriber):
         else:
             dtype = torch.float16
         logger.info(f"Loading ASR Model: {self.model_name} on {self.device} ({dtype})")
+        # No chunk_length_s: that selects the chunked algorithm, which cannot use
+        # the loop guards below -- compression_ratio_threshold and temperature
+        # fallback only exist in Whisper's sequential long-form path. Chunked
+        # decoding looped on 3 of 12 sampled windows, duplicating 46-59% of its
+        # 8-grams and inflating one 90s window to 542 words (~360 wpm).
         self.pipe = pipeline(
             "automatic-speech-recognition",
             model=self.model_name,
             device=self.device,
             torch_dtype=dtype,
-            chunk_length_s=30,
-            stride_length_s=5,
             return_timestamps=True
         )
 
@@ -335,9 +338,21 @@ class WhisperTranscriber(BaseTranscriber):
                 generate_kwargs={
                     "language": "en",
                     "task": "transcribe",
-                    # The following two kwargs are to attempt to preserve disfluencies with a base openai whisper model
-                    # "initial_prompt": "Umm, uh, like, I mean, well, sort of, you know...",
-                    # "suppress_tokens": []  # Preserve disfluencies ("um", "uh", etc.)
+                    # Loop guards. Whisper's decoder can fall into a repetition
+                    # trap and emit the same phrase dozens of times; measured on
+                    # real audio it repeated "anterior commissure" 37 times in one
+                    # 90s window. These make it detect the trap and retry the
+                    # segment at a higher temperature instead.
+                    #
+                    # Deliberately NOT using no_repeat_ngram_size: banning repeated
+                    # n-grams would also delete genuine verbatim repetitions
+                    # ("as as as a as a"), which are a disfluency category this
+                    # project needs to keep.
+                    "condition_on_prev_tokens": False,
+                    "compression_ratio_threshold": 1.35,
+                    "logprob_threshold": -1.0,
+                    "no_speech_threshold": 0.6,
+                    "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
                 }
             )
 
