@@ -638,11 +638,15 @@ class GraniteTranscriber(BaseTranscriber):
         with torch.no_grad():
             generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
 
-        # Decode
+        # generate() returns the prompt followed by the completion, so decoding
+        # the whole sequence pastes the chat template into the transcript
+        # ("systemKnowledge Cutoff Date... userican you transcribe... assistant").
+        # Keep only the newly generated tokens.
+        prompt_length = inputs["input_ids"].shape[1]
         transcription = self.processor.batch_decode(
-            generated_ids,
+            generated_ids[:, prompt_length:],
             skip_special_tokens=True
-        )[0]
+        )[0].strip()
 
         logger.info(f"  Got text (length={len(transcription)}): {transcription[:100]}...")
 
