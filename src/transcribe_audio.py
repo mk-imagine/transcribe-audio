@@ -31,6 +31,32 @@ except ImportError:
 
 hf_logging.set_verbosity_error()
 
+
+def _transformers_version() -> tuple:
+    """(major, minor) of the installed transformers, for capability gating."""
+    import transformers
+    parts = transformers.__version__.split(".")
+    try:
+        return (int(parts[0]), int(parts[1]))
+    except (ValueError, IndexError):
+        return (0, 0)
+
+
+# Whisper's decoder can fall into a repetition trap: measured on real audio it
+# repeated "anterior commissure" 37 times in one 90s window, duplicating 59% of
+# its 8-grams. These make it detect the trap and retry the segment hotter.
+#
+# Deliberately NOT no_repeat_ngram_size: banning repeated n-grams would also
+# delete genuine verbatim repetitions ("as as as a as a"), which are a
+# disfluency category this project needs to keep.
+LOOP_GUARDS = {
+    "condition_on_prev_tokens": False,
+    "compression_ratio_threshold": 1.35,
+    "logprob_threshold": -1.0,
+    "no_speech_threshold": 0.6,
+    "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+}
+
 # --- Configuration & Setup ---
 logging.basicConfig(
     level=logging.INFO,
@@ -284,6 +310,13 @@ class WhisperTranscriber(BaseTranscriber):
         # float32 -- more than a small card can host alongside the diarizer.
         # Half precision halves that to ~3.1GB (measured); CPU keeps float32
         # since fp16 matmuls there are slow and often unimplemented.
+        # The loop guards below are rejected outright by older transformers:
+        # measured, 4.37.2 (the nyrahealth CrisperWhisper fork) fails on every
+        # combination, while 4.57.3 accepts them. CrisperWhisper 1 is pinned to
+        # that fork, so the guards are applied only where they are supported
+        # rather than breaking the one model that needs the old stack.
+        self.supports_loop_guards = _transformers_version() >= (4, 39)
+
         device_str = str(self.device)
         if device_str.startswith("cpu"):
             dtype = torch.float32
@@ -295,16 +328,13 @@ class WhisperTranscriber(BaseTranscriber):
         else:
             dtype = torch.float16
         logger.info(f"Loading ASR Model: {self.model_name} on {self.device} ({dtype})")
-        # No chunk_length_s: that selects the chunked algorithm, which cannot use
-        # the loop guards below -- compression_ratio_threshold and temperature
-        # fallback only exist in Whisper's sequential long-form path. Chunked
-        # decoding looped on 3 of 12 sampled windows, duplicating 46-59% of its
-        # 8-grams and inflating one 90s window to 542 words (~360 wpm).
         self.pipe = pipeline(
             "automatic-speech-recognition",
             model=self.model_name,
             device=self.device,
             torch_dtype=dtype,
+            chunk_length_s=30,
+            stride_length_s=5,
             return_timestamps=True
         )
 
@@ -338,21 +368,8 @@ class WhisperTranscriber(BaseTranscriber):
                 generate_kwargs={
                     "language": "en",
                     "task": "transcribe",
-                    # Loop guards. Whisper's decoder can fall into a repetition
-                    # trap and emit the same phrase dozens of times; measured on
-                    # real audio it repeated "anterior commissure" 37 times in one
-                    # 90s window. These make it detect the trap and retry the
-                    # segment at a higher temperature instead.
-                    #
-                    # Deliberately NOT using no_repeat_ngram_size: banning repeated
-                    # n-grams would also delete genuine verbatim repetitions
-                    # ("as as as a as a"), which are a disfluency category this
-                    # project needs to keep.
-                    "condition_on_prev_tokens": False,
-                    "compression_ratio_threshold": 1.35,
-                    "logprob_threshold": -1.0,
-                    "no_speech_threshold": 0.6,
-                    "temperature": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+                    # See LOOP_GUARDS; omitted where transformers is too old.
+                    **(LOOP_GUARDS if self.supports_loop_guards else {}),
                 }
             )
 
