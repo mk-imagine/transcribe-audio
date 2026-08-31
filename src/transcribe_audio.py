@@ -1,4 +1,5 @@
 import argparse
+import sys
 import torch
 import json
 import subprocess
@@ -162,9 +163,19 @@ class BaseTranscriber:
     """Abstract base class for transcription models"""
     SEGMENT_SIZE = 300  # 5 minutes in seconds
 
+    # Generation can fail on a particular window and succeed on its halves --
+    # the trigger is where the model's internal 30s chunk boundaries land, not
+    # the audio itself. Subdividing moves those boundaries, so a failed window
+    # is retried rather than written off.
+    MAX_RETRY_DEPTH = 3
+    MIN_RETRY_WINDOW = 30.0
+
     def __init__(self, model_name: str, device: Union[str, torch.device]):
         self.model_name = model_name
         self.device = device
+        # Ranges that no subdivision could transcribe. Non-empty means the
+        # transcript has holes in it and the run must not report success.
+        self.failed_ranges: List[tuple] = []
 
     def transcribe(self, audio_path: Union[str, Path]) -> List[Dict]:
         """Transcribe audio file with automatic segmentation."""
@@ -178,7 +189,7 @@ class BaseTranscriber:
 
         # Short audio - process directly
         if duration <= self.SEGMENT_SIZE:
-            return self._transcribe_segment(str(audio_path), 0, duration)
+            return self._segment_with_retry(str(audio_path), 0, duration)
 
         # Long audio - process in segments
         logger.info(f"Audio is {duration:.1f}s long. Processing in {self.SEGMENT_SIZE}s segments...")
@@ -188,18 +199,47 @@ class BaseTranscriber:
             end_time = min(start_time + self.SEGMENT_SIZE, duration)
             logger.info(f"Processing segment: {start_time}s - {end_time}s ({start_time/60:.1f}min - {end_time/60:.1f}min)")
 
-            try:
-                chunks = self._transcribe_segment(str(audio_path), start_time, end_time)
-                # Adjust timestamps to absolute time
-                self._adjust_timestamps(chunks, start_time, end_time)
-                all_chunks.extend(chunks)
-                logger.info(f"✓ Segment {start_time}s - {end_time}s completed ({len(chunks)} chunks)")
-            except Exception as e:
-                logger.error(f"✗ Error at segment {start_time}s - {end_time}s: {e}")
-                all_chunks.append(self._create_error_chunk(start_time, end_time, e))
-                continue
+            chunks = self._segment_with_retry(str(audio_path), start_time, end_time)
+            all_chunks.extend(chunks)
 
+        self._report_failures(duration)
         return all_chunks
+
+    def _segment_with_retry(self, audio_path: str, start_time: float, end_time: float,
+                            depth: int = 0) -> List[Dict]:
+        """Transcribe one window, halving it on failure before giving up."""
+        try:
+            chunks = self._transcribe_segment(audio_path, start_time, end_time)
+            self._adjust_timestamps(chunks, start_time, end_time)
+            logger.info(f"✓ Segment {start_time:.0f}s - {end_time:.0f}s completed ({len(chunks)} chunks)")
+            return chunks
+        except Exception as e:
+            span = end_time - start_time
+            if depth < self.MAX_RETRY_DEPTH and span / 2 >= self.MIN_RETRY_WINDOW:
+                mid = start_time + span / 2
+                logger.warning(
+                    f"⟳ Segment {start_time:.0f}s - {end_time:.0f}s failed ({e}); "
+                    f"retrying as two {span/2:.0f}s halves"
+                )
+                return (self._segment_with_retry(audio_path, start_time, mid, depth + 1)
+                        + self._segment_with_retry(audio_path, mid, end_time, depth + 1))
+
+            logger.error(f"✗ Segment {start_time:.0f}s - {end_time:.0f}s unrecoverable: {e}")
+            self.failed_ranges.append((start_time, end_time))
+            return [self._create_error_chunk(start_time, end_time, e)]
+
+    def _report_failures(self, duration: float):
+        """Summarise unrecoverable gaps. Silence here would hide missing audio."""
+        if not self.failed_ranges:
+            return
+        lost = sum(e - s for s, e in self.failed_ranges)
+        pct = (lost / duration * 100) if duration else 0.0
+        logger.error(
+            f"INCOMPLETE TRANSCRIPT: {len(self.failed_ranges)} range(s), "
+            f"{lost:.0f}s of {duration:.0f}s missing ({pct:.1f}%)"
+        )
+        for s_, e_ in self.failed_ranges:
+            logger.error(f"    missing {s_:.0f}s - {e_:.0f}s  ({s_/60:.1f}min - {e_/60:.1f}min)")
 
     def _get_audio_duration(self, audio_path: Union[str, Path]) -> float:
         """Get audio duration in seconds."""
@@ -834,6 +874,15 @@ def main():
 
     orchestrator = TranscriptionOrchestrator(args)
     orchestrator.run()
+
+    # A transcript with holes in it is not a successful run. Outputs are still
+    # written -- the placeholder chunks keep the timeline intact -- but the exit
+    # status has to say so, or a batch scheduler reports the job as clean while
+    # audio is silently missing from the transcript.
+    failed = getattr(orchestrator.transcriber, "failed_ranges", [])
+    if failed:
+        logger.error(f"Exiting non-zero: {len(failed)} audio range(s) could not be transcribed.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
