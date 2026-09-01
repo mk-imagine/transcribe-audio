@@ -80,7 +80,7 @@ Use `${PIPESTATUS[0]}`.
 
 | env | torch | transformers | purpose |
 |---|---|---|---|
-| **`cw2native`** | 2.13.0 | 5.16.1 | **Primary.** `crisperwhisper` 2.0.2 — the supported way to run CrisperWhisper (D17). No pyannote. |
+| **`cw2native`** | 2.13.0 | 5.16.1 | **Primary**, and the default `transcribe.slurm` activates. `crisperwhisper` 2.0.2 — the supported way to run CrisperWhisper (D17). **No pyannote**, so runs here need `--no_diarize`. |
 | `audio-transcribe` | 2.8.0 | 4.57.3 | pyannote 4.0.3 + peft. Diarization and generic models. |
 | `audio-transcribe-tf5` | 2.8.0 | 5.16.1 | Granite 4.1/`granite_speech_plus`, Qwen3-ASR, Parakeet — all need transformers ≥ 5.13. |
 | `audio-transcribe-crisper` | 2.8.0 | 4.37.2 | nyrahealth transformers fork for CrisperWhisper **v1**. Obsolete under D17; delete once nothing references it. |
@@ -98,6 +98,25 @@ Rocky 8's system `libstdc++` lacks:
 ```bash
 LD_LIBRARY_PATH=$HOME/miniforge3/envs/diarizen/lib mamba run -n diarizen python ...
 ```
+
+### Running stage 1
+
+```bash
+# from src/, in cw2native
+python -u transcribe_audio.py -i ../data/geisler.wav -o ../transcripts/out \
+    --start_time 00:45:00 --end_time 00:46:30 --no_diarize --mode verbatim
+```
+
+Outputs `<name>_raw.json` (schema v1, the record) and `<name>_preview.txt` (a stage-1
+preview, not the stage-2 render). Exit codes: **1** means audio ranges were lost and the
+transcript has holes; **2** means the model id or the requested mode was refused.
+
+`python transcribe_audio.py --help` lists the registered model ids. An unregistered id is
+refused rather than guessed at, so a new checkpoint needs a `ModelSpec` in
+`src/pipeline/registry.py` (or `--adapter`, which is recorded in the output's provenance).
+
+`python3 tests/check_contract.py` runs 31 dependency-free checks — it needs no models, no
+GPU and no packages, so it runs on the Mac and on the login node alike.
 
 ### Data
 
@@ -123,6 +142,13 @@ against CUDA 13 and fail to load on a CUDA 12 base).
 **8 GB is the binding constraint.** whisper-large-v3-class models are ~6.2 GB in float32 —
 half precision is mandatory, and word-level timestamps OOM outright. This is what
 `--timestamp_mode chunk` exists for; it is unnecessary on POLARIS.
+
+That flag applies to the **generic Whisper adapter only** — CrisperWhisper 2 always requests
+word timestamps, and on the ct2 backend they cost no measurable wall time. Chunk mode
+coarsens the record, so it is written to `asr.granularity` in the raw JSON rather than left
+for stage 2 to infer. It survived the D13 cleanup for this reason: bug 17's "chunk-level
+timestamp workaround" was CrisperWhisper's chunk-level *pin*, which is gone, whereas this
+flag has its own current justification.
 
 ---
 
