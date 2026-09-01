@@ -30,6 +30,14 @@ Reference audio under `data/` is human-subjects material. Job scripts name those
 paths, which is another reason nothing in here is committed.
 
 Production runs go through `src/run_transcription.sh`, not these scripts, and it
-writes to `hpc/logs/` too. It derives every path from its own location, so it
-works from any directory. A direct `sbatch src/transcribe.slurm` must be run
-from the repo root; it will refuse with a clear message otherwise.
+writes to `hpc/logs/` too. It derives every path from its own location and
+creates the log directory before submitting, so it works from any directory.
+
+A direct `sbatch src/transcribe.slurm` must be run **from the repo root**. Its
+`--output` is relative to the submit directory, SLURM will not create that
+directory, and a job whose log file cannot be opened dies immediately *with no
+log to explain why*. The wrapper exists partly to make that unreachable.
+
+Neither entry point changes the job's working directory: a relative
+`--input_path` or `--output_dir` stays relative to wherever you invoked it,
+which is the only behaviour that does not surprise the caller.

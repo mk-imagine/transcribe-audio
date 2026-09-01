@@ -2,8 +2,12 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 # Relative to the submit directory, so a direct `sbatch src/transcribe.slurm`
-# must be run from the repo root. run_transcription.sh overrides this with an
-# absolute path derived from its own location, so it works from anywhere.
+# must be run **from the repo root**. SLURM will not create the directory, and
+# a job whose output file cannot be opened dies immediately with no log at all
+# -- so submitting from elsewhere fails silently. run_transcription.sh
+# overrides this with an absolute path built from its own location and creates
+# the directory first, which is why it is the supported entry point and works
+# from any directory.
 #SBATCH --output=hpc/logs/transcribe_%j.log
 
 set -e
@@ -11,17 +15,21 @@ set -e
 echo "Running on node: $SLURMD_NODENAME"
 echo "Partition: $SLURM_JOB_PARTITION"
 
-# The pipeline is invoked as a bare filename below, so the job has to run from
-# src/. SLURM starts a job in the submit directory, which is not necessarily
-# that. REPO_ROOT is exported by run_transcription.sh; a direct sbatch falls
-# back to the submit directory, which must then be the repo root.
+# Resolve the pipeline absolutely, but leave the working directory alone.
+# SLURM starts a job in the submit directory, which is what the caller's
+# relative --input_path and --output_dir are relative to; cd-ing anywhere else
+# silently breaks them. REPO_ROOT is exported by run_transcription.sh; a direct
+# sbatch falls back to the submit directory, which must then be the repo root.
 REPO_ROOT="${REPO_ROOT:-$SLURM_SUBMIT_DIR}"
-if [ ! -f "${REPO_ROOT}/src/transcribe_audio.py" ]; then
+PIPELINE="${REPO_ROOT}/src/transcribe_audio.py"
+if [ ! -f "$PIPELINE" ]; then
     echo "ERROR: no src/transcribe_audio.py under REPO_ROOT=${REPO_ROOT}."
-    echo "       Submit from the repo root, or use src/run_transcription.sh."
+    echo "       Submit from the repo root, or use src/run_transcription.sh,"
+    echo "       which works from any directory."
     exit 2
 fi
-cd "${REPO_ROOT}/src"
+echo "Pipeline: $PIPELINE"
+echo "Working directory: $(pwd)"
 
 # --- Environment Setup ---
 # Adjust this path if your mamba/conda location is different on the cluster
@@ -59,7 +67,7 @@ echo "Starting job $SLURM_JOB_ID at $(date)"
 # checked explicitly. Exit 1 means audio ranges were lost and the transcript
 # has holes; exit 2 means the model id or the requested mode was refused.
 set +e
-python -u transcribe_audio.py \
+python -u "$PIPELINE" \
     --input_path "$1" \
     --output_dir "$2" \
     --clean_mode "$3" \
