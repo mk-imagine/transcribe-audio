@@ -14,8 +14,15 @@ if [ -f "${HOME}/miniforge3/etc/profile.d/mamba.sh" ]; then
     source "${HOME}/miniforge3/etc/profile.d/mamba.sh"
 fi
 
-# Activate the environment you created
-mamba activate audio-transcribe
+# Which environment to activate. CrisperWhisper needs the nyrahealth
+# transformers fork, which cannot share an environment with the newer
+# transformers the other models want, so the env is selectable:
+#   TRANSCRIBE_ENV=audio-transcribe-crisper sbatch transcribe.slurm ...
+# or via run_transcription.sh -E <env>.
+CONDA_ENV="${TRANSCRIBE_ENV:-audio-transcribe}"
+
+echo "Activating conda environment: ${CONDA_ENV}"
+mamba activate "${CONDA_ENV}"
 
 # --- Threading Configuration ---
 # Ensure the script uses the CPUs allocated by Slurm, not all 128/64
