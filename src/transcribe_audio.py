@@ -726,7 +726,7 @@ class Diarizer:
             logger.warning("No HF Token provided. Diarization will be skipped.")
             return
 
-        logger.info("Loading Diarization Pipeline (pyannote/speaker-diarization-3.1)...")
+        logger.info(f"Loading Diarization Pipeline ({self.model_name})...")
         
         safe_globals = [torch.torch_version.TorchVersion]
         if Specifications is not None: safe_globals.append(Specifications)
@@ -743,8 +743,8 @@ class Diarizer:
             target_device = torch.device(self.device) if isinstance(self.device, str) else self.device
             try:
                 self.pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-community-1",
-                    token=self.auth_token 
+                    self.model_name,
+                    token=self.auth_token
                 ).to(target_device)
             except Exception as e:
                 if "403" in str(e):
@@ -752,7 +752,7 @@ class Diarizer:
                     raise e
                 logger.info(f"Retrying with 'use_auth_token'...")
                 self.pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-community-1",
+                    self.model_name,
                     use_auth_token=self.auth_token
                 ).to(target_device)
         except Exception as e:
