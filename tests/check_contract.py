@@ -246,6 +246,9 @@ class _Args:
         self.mode = "verbatim"
         self.hotwords_list = []
         self.timestamp_mode = "word"
+        self.source_path = None
+        self.start_time = None
+        self.end_time = None
         self.__dict__.update(kw)
 
 
@@ -304,6 +307,21 @@ def _():
     doc = _run("mock/end-only", no_diarize=False, mode=None)
     assert all(w["timing_source"] == "derived" for w in doc["words"])
     assert all(w["start"] is not None for w in doc["words"])
+
+
+@check("an excerpt run names the original audio, not the temp file it was cut into")
+def _():
+    with tempfile.TemporaryDirectory() as td:
+        original = Path(td) / "original.wav"
+        excerpt = Path(td) / "temp_segment.wav"
+        _silence(original, 120); _silence(excerpt, 90)
+        doc = transcribe(_Args(model="mock/start-end", input_path=str(excerpt),
+                               source_path=str(original), start_time="00:45:00",
+                               end_time="00:46:30"))
+    assert doc["source"]["audio_path"].endswith("original.wav"), doc["source"]
+    assert doc["source"]["duration_s"] == 90.0
+    assert doc["source"]["excerpt"]["offset_s"] == 2700.0, doc["source"]["excerpt"]
+    assert doc["source"]["excerpt"]["timestamps_relative_to"] == "excerpt"
 
 
 @check("the validator catches a malformed document")

@@ -125,7 +125,10 @@ def load_hotwords(spec: Optional[str]) -> List[str]:
 
 
 def output_basename(args) -> str:
-    name = Path(args.input_path).stem
+    # The original file's name, never the working excerpt's: with --start_time
+    # the excerpt is a temp file, and naming outputs after it produced
+    # "temp_segment_004500_geisler_seg_004500_jobverbatim_raw.json".
+    name = Path(getattr(args, "source_path", None) or args.input_path).stem
     if args.start_time:
         name += f"_seg_{args.start_time.replace(':', '')}"
     if args.job_id:
@@ -198,6 +201,9 @@ def main() -> None:
     handler = AudioHandler(output_dir)
 
     try:
+        # The record names the original audio; input_path becomes the working
+        # excerpt, which is deleted when the run ends.
+        args.source_path = args.input_path
         args.input_path = str(
             handler.prepare_segment(Path(args.input_path), args.start_time, args.end_time)
         )

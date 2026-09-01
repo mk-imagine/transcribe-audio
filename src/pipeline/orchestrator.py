@@ -213,11 +213,7 @@ def transcribe(args) -> Dict[str, Any]:
         asr["revision"] = result.revision
 
     doc = schema.build(
-        source={
-            "audio_path": str(audio_path.resolve()),
-            "audio_sha256": provenance.sha256_file(audio_path),
-            "duration_s": round(duration, 3),
-        },
+        source=_source_block(args, audio_path, duration),
         run=provenance.run_block(device),
         asr=asr,
         diarization=diarizer.provenance() if diarizer is not None else None,
@@ -230,6 +226,42 @@ def transcribe(args) -> Dict[str, Any]:
     )
     logger.info("Stage 1 complete: %s", schema.summary(doc))
     return doc
+
+
+def _source_block(args, processed: Path, duration: float) -> Dict[str, Any]:
+    """Identify the audio that was transcribed, and what it was cut from.
+
+    With --start_time the working file is a temporary excerpt that is deleted
+    as soon as the run ends, so recording *its* path and hash names something
+    nobody can ever check again. The original is hashed instead, and the
+    excerpt bounds are recorded alongside -- word timestamps are relative to
+    the excerpt, which stage 2 cannot infer and must not assume.
+    """
+    original = Path(getattr(args, "source_path", None) or processed)
+    block: Dict[str, Any] = {
+        "audio_path": str(original.resolve()),
+        "audio_sha256": provenance.sha256_file(original),
+        "duration_s": round(duration, 3),
+    }
+    if getattr(args, "start_time", None):
+        block["excerpt"] = {
+            "start_time": args.start_time,
+            "end_time": getattr(args, "end_time", None),
+            "offset_s": _hhmmss(args.start_time),
+            "timestamps_relative_to": "excerpt",
+        }
+    return block
+
+
+def _hhmmss(value: str) -> Optional[float]:
+    try:
+        parts = [float(p) for p in str(value).split(":")]
+    except ValueError:
+        return None
+    seconds = 0.0
+    for part in parts:
+        seconds = seconds * 60 + part
+    return seconds
 
 
 def _model_warnings(result: AdapterResult) -> List[str]:
