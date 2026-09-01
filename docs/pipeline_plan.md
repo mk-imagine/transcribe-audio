@@ -68,6 +68,8 @@ Settled. Each entry records what would reopen it.
 | D2 | **Capability contract, not a model-name factory** | Plug-and-play comes from adapters declaring what they provide, with the orchestrator filling gaps. | — |
 | D3 | **Stage 1 is verbatim and lossless.** No cleaning, filtering, or speaker assignment. | Cleaning in stage 1 destroys information before it is ever written to disk. | — |
 | D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
+| D20 | **Use `mamba` for all environment management, never `conda`.** | Faster resolution, and `src/transcribe.slurm` already activates through it — mixing the two invites drift between what a job activates and what was built. Build fresh rather than `--clone`: clones hardlink, so pip in a clone can strip packages from the source env. | — |
+| D19 | **Read the model's own docs before writing an integration; never assume a generic loader is correct.** | A generic loader that runs is not evidence it runs correctly — the failure is silent and produces self-consistent wrong measurements. See the callout at the head of §3 for three worked instances. | — |
 | D18 | **Proper-noun detection by three-dissenter conjunction (§7b), compared on a fluent view.** | Glossaries cannot be built ahead of an arbitrary lecture, but cross-model disagreement localises garbles without one. Dissenters must come from independent lineages. | A single model gains reliable proper-noun accuracy |
 | D4 | **Default model: `nyralabs/CrisperWhisper2.0_large`** | Verbatim is its explicit training objective, not an accident of its corpus. Only candidate with a documented verbatim/intended switch. | Phase 0 shows poor disfluency retention on real audio |
 | D5 | **Second adapter: `ibm-granite/granite-speech-4.1-2b-plus`** | Apache 2.0, and exercises three capability paths CW2 does not (`end_only` timestamps, silence tokens, native speaker labels) — which is what proves the contract is real. | — |
@@ -86,6 +88,29 @@ Settled. Each entry records what would reopen it.
 ---
 
 ## 3. Verified model facts
+
+> ### Read the model's own documentation before writing any integration
+>
+> **Always check a model's card, README and package API before assuming a generic
+> loader will work.** This applies to every open model — HuggingFace or elsewhere —
+> and to every generic interface: `transformers.pipeline`, `AutoModelFor*`, or any
+> other convenience wrapper.
+>
+> A generic loader that *runs* is not evidence that it runs *correctly*. The failure
+> is quiet: the model produces plausible output, every measurement you take is
+> internally consistent, and the conclusions are wrong. Three instances in one week:
+>
+> | model | generic assumption | what the docs said | cost |
+> |---|---|---|---|
+> | CrisperWhisper 2 | `transformers.pipeline` | package exposes `mode="verbatim"`, absent from the pipeline | benchmarked as emitting **zero** disfluencies; drove a ten-model search and a fine-tuning plan that were unnecessary |
+> | ARK-ASR-0.6B | cast every float tensor to fp16, feed 90 s | cast **only** `inputs["audios"]`; `audio_max_length=30*16000`; `do_sample=False`; `bad_words_ids` | output collapsed into repeated CJK characters; nearly discarded a working model |
+> | CTC models (Parakeet, Granite TurboCTC) | reuse the seq2seq `chunk_length_s` | CTC is frame-synchronous and needs no chunking | silently returned ~12% of the content (63 words where the reference was 545) |
+>
+> The tell in all three: output that is *plausible but wrong in a way no error message
+> reports*. Before trusting a benchmark number, confirm the invocation matches the
+> documented one — including defaults, dtype handling, input length limits and
+> generation flags. Where a model ships its own package, prefer it over the generic
+> wrapper and record which was used (§5 provenance).
 
 **Verified 2026-08-27 by fetching the model cards directly.** These postdate common knowledge
 cutoffs — do not "correct" them from memory. Re-verify if acting on them much later.
@@ -197,10 +222,14 @@ all, though Qwen's context injection *does* fix proper nouns.
   2026-08-25, Apache 2.0, 470 M params, conformer + CTC, 16,384 BPE units, ~60,000 h English,
   non-autoregressive greedy decoding. **No prompting, no timestamps.** → D7.
 
-### Currently-wired weights to replace
+### Currently-wired weights — resolved 2026-08-31
 
-`unsloth/crisperwhisper` and `kyr0/crisperwhisper-unsloth-mlx` are third-party redistributions
-of CrisperWhisper **v1** with murkier provenance. Move to official `nyralabs` weights.
+The default is now `nyralabs/CrisperWhisper2.0_large`. The v1 redistributions
+(`unsloth/crisperwhisper`, `kyr0/crisperwhisper-unsloth-mlx`) are not merely lower-provenance:
+on v1 the package **silently ignores `mode` and `hotwords` and emits no disfluency markers**.
+It warns, and the run still succeeds — verified by getting byte-identical 158-word output for
+`verbatim`, `verbatim+hotwords` and `intended`. Passing a v1 checkpoint disables the features
+this pipeline depends on without failing.
 
 ---
 
@@ -602,6 +631,17 @@ Capability contract, registry, `mock` adapter, CrisperWhisper 2 adapter, raw JSO
 full provenance. Keep pyannote. Bypass chunking when `longform == "native"`. Delete the MLX
 path and the MPS workaround. Update the SLURM wrapper and add the `prototype` profile.
 
+**Done (2026-08-31):** the CrisperWhisper 2 adapter — `CrisperWhisperTranscriber` now drives
+the `crisperwhisper` package directly instead of subclassing the transformers path, bypasses
+the 300 s segmentation via native long-form, and exposes `--mode` and `--hotwords`. Verified
+end to end: verbatim gives 10 markers on a 90 s window with per-word timestamps on every
+token including the markers; `--hotwords` fixes the proper noun while keeping all 10;
+`--mode intended` suppresses them.
+
+**Still open in this phase:** capability contract, registry (bug 7 — the factory still
+substring-sniffs), `mock` adapter, schema v1 with provenance, deleting the MLX path (bug 17),
+and the SLURM `prototype` profile.
+
 ### Phase 2 — Stage 2 renderer
 
 Speaker assignment with boundary smoothing, turn grouping, within-turn anchors, both profiles,
@@ -624,53 +664,48 @@ for this project.**
 
 ## 9. Bugs in the current code
 
-Fix or delete during the rewrite; the first two are costing data today.
+### Fixed (2026-08-27 → 08-31)
 
-1. `max_new_tokens=500` on a 300 s Granite segment (`src/transcribe_audio.py:505`) — five
-   minutes of speech far exceeds 500 tokens, so **every chunk's tail is silently truncated**.
+Kept here for the reasoning, not the code. Each was found by running real audio, not by
+reading source.
+
+| # | Defect | Why it mattered |
+|---|---|---|
+| 1 | `max_new_tokens=500` on a 300 s Granite segment | ~950–1200 tokens of speech at measured rates, so every segment's tail was silently truncated |
+| 8 | `_adjust_pauses` ran during transcription | Collapsed every gap under 0.12 s and shortened the rest — **59% of inter-word gaps came out exactly 0.000 s**, destroying the silence durations sentence segmentation reads. Now opt-in; moot for CW2, which is never routed through it |
+| 10 | `Diarizer` ignored `model_name` | Both `from_pretrained` calls hardcoded `community-1`, so `--diarizer_model` was inert while the log named a third model nobody loaded |
+| 11 | No Whisper loop guards | 3 of 12 windows looped, duplicating 46–59% of 8-grams; one produced 542 words (~360 wpm) with "anterior commissure" ×37. Moot for CW2 (native `temperature_fallback`), still needed for generic Whisper |
+| 12 | Three Granite adapter defects | `sampling_rate` to a processor without that parameter; 500-token cap; decode read the prompt back, pasting the chat template in as speech |
+| 13 | Failed segments exited 0 | One lecture lost **12.7%** of its audio, visible only by grepping the JSON. Retry-by-subdivision recovered every range (11,588 → 13,193 words); unrecoverable ranges now force a non-zero exit |
+| 15 | `mlx_whisper` and `pyannote` imported at module scope | An optional backend took the whole script down — the second cost a debugging cycle *after* the first was fixed |
+| 16 | Default model was `unsloth/crisperwhisper` (**v1**) | v1 silently ignores `--mode` and `--hotwords` and emits no markers. It warns; the run still succeeds |
+
+**The recurring shape:** a module-scope import of an optional dependency (15), a silent
+success that disables a feature (16), and a failure that exits 0 (13). None announced itself.
+
+### Outstanding
+
 2. `Diarizer.run` references `diarization` in its `except` block before assignment — a
    `NameError` that **masks the real exception**.
-3. Fixed 300 s boundaries cut mid-word. Moot for CW2 (native long-form); still applies to any
-   `needs_chunking` model, which should split on silence.
-4. `TextCleaner` runs inline in stage 1 and destroys information before it is written. Moves to
-   `annotate.py` as a tagger, not a deleter.
+3. Fixed 300 s boundaries cut mid-word. Bypassed for CrisperWhisper (native long-form) but
+   still applies to any `needs_chunking` model, which should split on silence.
+4. `TextCleaner` runs inline in stage 1 and destroys information before it is written. Moves
+   to `annotate.py` as a tagger, not a deleter.
 5. Chunks that clean to empty are `continue`d, silently punching holes in the timeline.
 6. `_adjust_timestamps` uses absolute `end_time` as the fallback for a missing relative end.
-7. `TranscriberFactory` substring-sniffs model names; replaced by the registry.
-8. `_adjust_pauses` runs in stage 1 and is lossy. It redistributes every gap below
-   `split_threshold` (0.12 s) into the adjacent words and shortens larger gaps by the same
-   amount. Measured on two ~80 min recordings, **59% of inter-word gaps come out exactly
-   0.000 s** — destroying the pause signal stage 2's sentence rule depends on. Same defect as
-   bug 4: pure data transformation belongs in stage 2, not ahead of the write.
-9. Per-segment `librosa.load(path, offset=...)` re-decodes a compressed source from byte zero
-   for every segment, so decode cost grows with duration. Measured wall-to-wall on the same
-   file and GPU: 79 min of `.m4a` took **91 min**, against **57 min** for the same audio
-   pre-converted to `.wav` — a **1.6x penalty**, for 3.6 s of ffmpeg. (An earlier draft said
-   ~4x; that compared a transcription-only rate against a wall time including diarization.)
-   Decode once into a working array, or seek with ffmpeg.
-10. `Diarizer` stored `model_name` but **never used it**: both `Pipeline.from_pretrained`
-    calls hardcoded `community-1`, so `--diarizer_model` was inert, and the log line announced
-    `speaker-diarization-3.1` — a third model, loaded by nobody. Any provenance taken from
-    those logs named the wrong component. *(Fixed.)*
-11. The Whisper pipeline passed **no loop guards**. Whisper's decoder falls into repetition
-    traps: measured across 12 sampled 90 s windows, CrisperWhisper 2 looped on 3 of them,
-    duplicating 46-59% of its 8-grams and once emitting "anterior commissure" 37 times in a
-    single window. `compression_ratio_threshold` + temperature fallback eliminate it (0.0%
-    duplicate 8-grams). Note these exist only in Whisper's *sequential* path and are rejected
-    outright by transformers 4.37.2, so they must be capability-gated. *(Fixed.)*
-12. The Granite adapter had three independent defects, each fatal: `sampling_rate` passed to
-    `GraniteSpeechProcessor.__call__` (which has no such parameter) reached the tokenizer and
-    failed every segment; `max_new_tokens=500` truncated anything past ~90 s; and the decode
-    read the whole generated sequence, pasting the chat template into the transcript as if it
-    were speech. *(All fixed.)*
-13. A failed segment became an error placeholder and the run **exited 0**. One lecture lost
-    12.7% of its audio this way, visible only by grepping the JSON. The failures are also
-    recoverable: the same window fails as a whole and succeeds as two halves, because the
-    trigger is where the model's internal 30 s chunk boundaries land. Retry by subdivision
-    recovered every lost range; unrecoverable ranges now force a non-zero exit. *(Fixed.)*
-14. CTC models must **not** be given `chunk_length_s`. Measured on 300 s where the reference
-    is 545 words: `parakeet-ctc-0.6b` returned 63 words chunked and 566 unchunked;
-    `granite-470m-turboctc` 68 against 581. Chunking silently discards ~88% of the content.
+7. `TranscriberFactory` substring-sniffs model names (`"crisper" in name`, `"mlx" in name`);
+   replaced by the registry in Phase 1.
+9. Per-segment `librosa.load(path, offset=...)` re-decodes a compressed source from byte zero.
+   Measured wall-to-wall: 79 min of `.m4a` took **91 min** against **57 min** for the same
+   audio as `.wav` — a **1.6x penalty** for 3.6 s of ffmpeg. Bypassed for CrisperWhisper,
+   still live for chunked models. *(An earlier draft said ~4x; that compared a
+   transcription-only rate against a wall time including diarization.)*
+14. CTC models must **not** be given `chunk_length_s` — not a bug in this code, a calling
+    rule. On 300 s where the reference is 545 words, `parakeet-ctc-0.6b` returned 63 chunked
+    and 566 unchunked; `granite-470m-turboctc` 68 against 581. Chunking discards ~88% of the
+    content silently.
+17. The MLX path (`MLXCrisperWhisperTranscriber`) is still present despite D13. Delete it in
+    Phase 1 along with the chunk-level timestamp workaround it motivated.
 
 ---
 
