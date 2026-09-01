@@ -70,7 +70,7 @@ Settled. Each entry records what would reopen it.
 | D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
 | D20 | **Use `mamba` for all environment management, never `conda`.** | Faster resolution, and `src/transcribe.slurm` already activates through it — mixing the two invites drift between what a job activates and what was built. Build fresh rather than `--clone`: clones hardlink, so pip in a clone can strip packages from the source env. | — |
 | D21 | **Hotwords are a declared capability, and the standard CrisperWhisper 2 checkpoints declare `untrained`.** | Hotword boosting is trained into the Pro checkpoints only. On a standard checkpoint the package accepts the argument, raises a `UserWarning` and can *degrade* transcription -- measured, it did (§3). A run may still pass them; it warns, and the warning is written into the record. | Nyra documents hotword training for the standard weights, or a Pro licence is bought |
-| D22 | **Proper-noun spelling comes from the `intended` stream, not from hotwords.** | `intended` spelled the probe name correctly with no biasing and left neighbouring words intact, where hotwords fixed the name and damaged a different word. `transcribe_dual()` gets both streams in one ct2 pass (D12). | The dual-stream comparison fails to reproduce over more windows |
+| ~~D22~~ | **Withdrawn 2026-09-01, the same day it was added.** It claimed proper-noun spelling should come from the `intended` stream. The measurement behind it was wrong (§3): a substring regex scored `Courchesney` as a match for `Courchesne`. The number is not reused; the open question is tracked in §10. | — | — |
 | D19 | **Read the model's own docs before writing an integration; never assume a generic loader is correct.** | A generic loader that runs is not evidence it runs correctly — the failure is silent and produces self-consistent wrong measurements. See the callout at the head of §3 for three worked instances. | — |
 | D18 | **Proper-noun detection by three-dissenter conjunction (§7b), compared on a fluent view.** | Glossaries cannot be built ahead of an arbitrary lecture, but cross-model disagreement localises garbles without one. Dissenters must come from independent lineages. | A single model gains reliable proper-noun accuracy |
 | D4 | **Default model: `nyralabs/CrisperWhisper2.0_large`** | Verbatim is its explicit training objective, not an accident of its corpus. Only candidate with a documented verbatim/intended switch. | Phase 0 shows poor disfluency retention on real audio |
@@ -208,14 +208,41 @@ So biasing does fix the target name, and it damaged a **different** word in the 
 list did not restore it -- it removed the token altogether. Disfluency markers were unaffected
 throughout (10 filled pauses in every run).
 
-**`--mode intended` spelled `Courchesne` correctly 4/4 with no hotwords at all**, and kept both
-`commissure` occurrences. The intended decoder already knows the name; only the verbatim
-decoder garbles it. That points at `transcribe_dual()` (D12, ct2-only, ~1.9x faster than two
-passes) as the proper-noun source: verbatim for the disfluencies, intended for the spelling,
-one pass. See D22 and §7b.
-
 One 90 s window, so the direction is measured but not established. What is established is that
 the previous entry recorded the benefit without checking the cost.
+
+#### A fourth instance of D19 — this one self-inflicted (2026-09-01)
+
+An earlier version of this section claimed **"`--mode intended` spelled `Courchesne`
+correctly 4/4 with no hotwords at all"**, and D22 was written on that basis: take proper-noun
+spelling from the intended stream rather than from hotwords.
+
+It was wrong. The check counted occurrences with the regex `Courchesne`, which **matches
+inside `Courchesney`**. Re-run against exact token forms:
+
+| run | exact `Courchesne` | what the tokens actually are |
+|---|---|---|
+| verbatim, no hotwords | 0 | `Korshane` x2, `Korshesney` x2 |
+| **`--mode intended`** | **0** | **`Courchesney` x4** |
+| **`--hotwords Courchesne`** | **4** | `Courchesne` x4 |
+
+So the intended stream is *closer* than verbatim — it recovers the French shape of the name —
+but it is still wrong, consistently, four times out of four. **Hotwords produced the only
+correct spelling in any run.**
+
+That leaves a genuine trade-off with no clean side, which is why D22 was withdrawn rather
+than reversed:
+
+- **hotwords** get the target name exactly right, and damage a neighbouring word
+  (`commissure` -> `commasure`, then deleted when the list grew);
+- **the intended stream** costs nothing, damages nothing, and still misspells the name.
+
+The failure shape is the one §3 opens by warning about, committed here in this project's own
+measurement code rather than in a model integration: plausible output, a self-consistent
+number, a wrong conclusion, and no error message anywhere. The generalisation worth keeping is
+that **D19 applies to the verification as much as to the integration** — a substring test
+where an exact test was meant is the measurement-side equivalent of a generic loader that
+runs. Proper-noun checks in this project compare whole tokens.
 
 #### Dual-stream costs ~11%, not 100% (measured 2026-09-01)
 
@@ -741,13 +768,12 @@ against course materials or an author database, then a targeted re-run. Where re
 fails, mark the token rather than guessing; a `[NAME?]` flag is worth more to a coder than a
 confident wrong spelling.
 
-**The re-run should go through `intended`, not `hotwords`** (D22). Measured 2026-09-01 on the
-45:00 window: `intended` spelled `Courchesne` correctly 4/4 unaided, where `verbatim` gave
-`Korshane`/`Korshesney`; hotwords also fixed it but corrupted a neighbouring word in the same
-window (§3). Since the *primary* stream must stay verbatim, that argues for
-`transcribe_dual()` -- both streams in one ct2 pass -- rather than a second targeted run, and
-makes the intended stream a fourth dissenter that shares the primary's lineage but not its
-register. One window so far; §10 tracks widening it to the 12-window sweep.
+**How the re-run should resolve a flagged token is open** (§10). Measured 2026-09-01 on the
+45:00 window, `hotwords` gave the only exactly-correct spelling of the probe name, and cost a
+neighbouring word to do it; `--mode intended` damaged nothing but still misspelled the name
+(`Courchesney`). Neither is a clean resolution step. The intended stream remains cheap enough
+to take from every dual-stream run and is worth keeping as evidence, but it does not settle a
+spelling on its own.
 
 Cost: ~78% on top of a Qwen primary, ~40% on top of CW2. Batch-only.
 
@@ -887,7 +913,7 @@ which arrives in Phase 3.
 | **Diarization at turn boundaries** | Short filler tokens near a speaker change are where max-overlap assignment is noisiest; hence smoothing within pause-bounded runs. |
 | **IRB / data governance** | Interview recordings are human-subjects data and stage 1 moves them to shared cluster storage. Assumed covered by the existing protocol; flagged because this pipeline automates the transfer. |
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
-| **Proper nouns: dual-stream instead of hotwords** | **Opened 2026-09-01.** `intended` spelled the probe name correctly unaided where `verbatim` garbled it, and hotwords fixed the name at the cost of a neighbouring word (§3, D21/D22). Next step is `transcribe_dual()` over the 12-window sweep: does the intended stream reliably spell proper nouns the verbatim stream garbles? If so §7b's resolution step should re-run through `intended`, not `hotwords`. One window so far. |
+| **Proper nouns: how to resolve a flagged token** | **Opened 2026-09-01, and genuinely open.** On the 45:00 window, `hotwords` produced the only exactly-correct spelling of the probe name and corrupted a neighbouring word doing it; `--mode intended` corrupted nothing and still got the name wrong (`Courchesney` x4). §7b's resolution step therefore has no good default. Worth measuring over the 12-window sweep, comparing **exact token forms**, not substrings: how often does each route land the correct spelling, and how often does hotword biasing damage a non-target token? D21's cost is established; the benefit's reliability is not. |
 | **Forced alignment (`align.py`)** | Dispatched to but not built. No registered real model declares `word_timestamps="none"`, so nothing needs it yet; the run records the gap in `warnings` rather than emitting untimed words that look timed. Build it when a model needs it, using `CrisperWhisperModel.forced_align()`. |
 | **CrisperWhisper `confidence`** | Declared `False`. `TranscriptionResult` has no per-word confidence field, so `conf` is always null. Worth revisiting if a later package version exposes one — coders benefit from knowing which tokens the model was unsure of. |
 
