@@ -14,7 +14,9 @@ from dotenv import load_dotenv
 from pathlib import Path
 from typing import List, Dict, Optional, Union
 from transformers import pipeline, AutoTokenizer, AutoModelForTokenClassification
-from pyannote.audio import Pipeline
+# pyannote is only needed for diarization, which --no_diarize skips and which
+# some environments (e.g. a CrisperWhisper-only install) do not carry. A
+# module-scope import made the whole script unimportable without it.
 try:
     from pyannote.audio.core.task import Specifications, Problem
 except ImportError:
@@ -517,6 +519,16 @@ class Diarizer:
     def load(self):
         if not self.auth_token:
             logger.warning("No HF Token provided. Diarization will be skipped.")
+            return
+
+        try:
+            from pyannote.audio import Pipeline
+        except ImportError:
+            logger.error(
+                "pyannote.audio is not installed; diarization unavailable. "
+                "Install it, or pass --no_diarize."
+            )
+            self.pipeline = None
             return
 
         logger.info(f"Loading Diarization Pipeline ({self.model_name})...")
