@@ -1,7 +1,8 @@
 # Transcription Pipeline — Plan of Attack
 
-**Status:** design agreed, **nothing implemented yet**
-**Last updated:** 2026-08-27
+**Status:** Phase 1 substantially complete — stage 1 rewritten under `src/pipeline/`.
+Phase 2 (the renderer) is the next block of work.
+**Last updated:** 2026-09-01
 **Supersedes:** `docs/granite_word_timestamps_plan.md` (see §12)
 
 > **Reading this cold?** §1–§4 give you the context and the decisions already made (with the
@@ -38,23 +39,22 @@ analytically meaningful. This is the single requirement that most constrains mod
 
 ### Current state of the code
 
-`src/transcribe_audio.py` (766 lines, everything in one file) is the existing pipeline. It
-works but is being **replaced**, not extended. What is there now:
+Stage 1 has been rewritten to the §4 layout. `src/transcribe_audio.py` is now a thin CLI over
+`src/pipeline/`: `capabilities.py` (the contract), `registry.py`, `adapters/`
+(`crisperwhisper2`, `whisper`, `mock`), `chunking.py`, `flags.py`, `diarize.py`,
+`provenance.py`, `schema.py`, `orchestrator.py`, `preview.py`. `tests/check_contract.py` runs
+31 dependency-free checks anywhere.
 
-- `TranscriberFactory` — substring-sniffs model names to pick a class
-- `WhisperTranscriber` / `CrisperWhisperTranscriber` / `MLXCrisperWhisperTranscriber` /
-  `GraniteTranscriber` — subclasses that do **not** agree on output granularity (word vs chunk
-  vs one-blob-per-segment)
-- `BaseTranscriber` — fixed 300 s chunking (`SEGMENT_SIZE`)
-- `TextCleaner` — none/basic/intelligent; **deletes** disfluencies inline in stage 1
-- `Diarizer` — pyannote `speaker-diarization-community-1`
-- `TranscriptionOrchestrator` — device selection, speaker assignment, JSON + TXT output
-- `src/run_transcription.sh`, `src/transcribe.slurm` — SLURM wrappers (8 hr walltime)
-- `src/transcribe_audio_mac.py` — separate Mac variant (349 lines)
+Gone: `TranscriberFactory`'s name-sniffing, the MLX path, `src/transcribe_audio_mac.py`, MPS
+device selection, and stage-1 text cleaning.
 
-Sample data: `data/251211_0009.wav`. Existing output: `transcripts/lecture transcript.txt` —
-fully normalized prose, zero disfluencies, no timestamps, multi-thousand-word paragraph blocks.
-Fine as lecture notes; **unusable for coding**, which is the gap this work closes.
+Not yet written: `annotate.py` (stage 1.5), `render.py` and everything under `src/render/`
+(stage 2, Phase 2), `align.py`, and the Granite adapter (Phase 3).
+
+Sample data: `data/geisler.wav`, `data/251211_0009.wav`, `data/tate_1.m4a` (see
+`docs/environments.md`). The old output `transcripts/lecture transcript.txt` — fully
+normalized prose, zero disfluencies, no timestamps, multi-thousand-word paragraph blocks — is
+what this work replaces: fine as lecture notes, **unusable for coding**.
 
 ---
 
@@ -69,6 +69,8 @@ Settled. Each entry records what would reopen it.
 | D3 | **Stage 1 is verbatim and lossless.** No cleaning, filtering, or speaker assignment. | Cleaning in stage 1 destroys information before it is ever written to disk. | — |
 | D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
 | D20 | **Use `mamba` for all environment management, never `conda`.** | Faster resolution, and `src/transcribe.slurm` already activates through it — mixing the two invites drift between what a job activates and what was built. Build fresh rather than `--clone`: clones hardlink, so pip in a clone can strip packages from the source env. | — |
+| D21 | **Hotwords are a declared capability, and the standard CrisperWhisper 2 checkpoints declare `untrained`.** | Hotword boosting is trained into the Pro checkpoints only. On a standard checkpoint the package accepts the argument, raises a `UserWarning` and can *degrade* transcription -- measured, it did (§3). A run may still pass them; it warns, and the warning is written into the record. | Nyra documents hotword training for the standard weights, or a Pro licence is bought |
+| ~~D22~~ | **Withdrawn 2026-09-01, the same day it was added.** It claimed proper-noun spelling should come from the `intended` stream. The measurement behind it was wrong (§3): a substring regex scored `Courchesney` as a match for `Courchesne`. The number is not reused; the open question is tracked in §10. | — | — |
 | D19 | **Read the model's own docs before writing an integration; never assume a generic loader is correct.** | A generic loader that runs is not evidence it runs correctly — the failure is silent and produces self-consistent wrong measurements. See the callout at the head of §3 for three worked instances. | — |
 | D18 | **Proper-noun detection by three-dissenter conjunction (§7b), compared on a fluent view.** | Glossaries cannot be built ahead of an arbitrary lecture, but cross-model disagreement localises garbles without one. Dissenters must come from independent lineages. | A single model gains reliable proper-noun accuracy |
 | D4 | **Default model: `nyralabs/CrisperWhisper2.0_large`** | Verbatim is its explicit training objective, not an accident of its corpus. Only candidate with a documented verbatim/intended switch. | Phase 0 shows poor disfluency retention on real audio |
@@ -79,7 +81,7 @@ Settled. Each entry records what would reopen it.
 | D9 | **Turn is the primary render unit**, subdivided within long turns | Confirmed by the user: interview coding is turn-level, with timestamps inside long turns for citation. | — |
 | D10 | **Both profiles carry timestamps** | Lecture profile needs them to check the audio when a transcript looks wrong. | — |
 | D11 | **HTML + print CSS is the default print format**; plain text always emitted; LaTeX optional; docx deferred | HTML has zero new dependencies and the fastest layout-iteration loop. | QDA tool adoption makes docx urgent |
-| D12 | **Dual-stream output is an adapter-internal optimisation, not an architecture** | `transcribe_dual()` is ct2-only; falling back to two sequential `transcribe()` calls keeps the *semantics* testable on any backend. | — |
+| D12 | **Dual-stream output is an adapter-internal optimisation, not an architecture** | `transcribe_dual()` is ct2-only; falling back to two sequential `transcribe()` calls keeps the *semantics* testable on any backend. **Implemented and verified 2026-09-01** — both routes produce byte-identical text (§3). | — |
 | D13 | **MPS and MLX are dropped.** Develop on CPU containers locally, CUDA on the cluster. | Docker on macOS cannot expose Metal to Linux containers, so MPS needs a bare-metal install — a policy exception for a platform that is never a deployment target. The repo already pays this tax (chunk-level timestamp workaround, whole MLX path). | — |
 | D14 | **The RTX 3070 VM is general ML infrastructure, not a blocker for this project** | Phase 0 is fully answerable in a CPU container. The VM's real value is serving every ML repo and resolving the host-install friction permanently. | — |
 | D15 | **Non-commercial weights accepted** | Non-commercial academic research; not researching model methods, just using them. | Work becomes commercial or ships tooling with weights |
@@ -179,11 +181,106 @@ categories appear in real output:
 Tag inventory over those 12 windows is exactly `{uh: 83, um: 38, laughter: 1}`. Vocalizations
 are supported but rare in this material; an uppercase-only regex will miss them.
 
-`word_timestamps=True` and the markers coexist. `hotwords=[...]` fixes proper nouns in the same
-pass: without it "Eric Korshane ... pronounced Korshesney"; with it "Eric Courchesne ...
-pronounced Courchesne", keeping all 22 markers in that window. `temperature_fallback=True` is
+`word_timestamps=True` and the markers coexist. `temperature_fallback=True` is
 on by default and no looping was observed (0.0% duplicate 8-grams on all 12 windows).
 Throughput **38x realtime** via the CTranslate2 backend.
+
+#### Hotwords are Pro-only, and they cost something (measured 2026-09-01)
+
+The package's own docstring says hotword boosting is trained into the **Pro** checkpoints
+only: on a standard model it "can degrade transcription rather than merely doing nothing",
+and `_warn_if_hotwords_unsupported()` raises a `UserWarning` for any non-`_pro` v2 id. The
+default `nyralabs/CrisperWhisper2.0_large` is standard, so every `--hotwords` run so far has
+been in that state, with the warning going to stderr unrecorded.
+
+An earlier note here recorded only the upside. Re-measured on `geisler.wav` 45:00-46:30, four
+runs, deterministic (a repeat was byte-identical):
+
+| hotwords | tokens | `Courchesne` | `Korsh*` | `commissure` |
+|---|---|---|---|---|
+| none | 166 | 0 | 4 | 2 |
+| `Courchesne` | 166 | **4** | 0 | 1 -- one became `commasure` |
+| `Courchesne,commissure,Geisler` | 165 | **4** | 0 | 1 -- `commasure` **deleted** |
+| (repeat of the above) | 165 | 4 | 0 | 1 |
+
+So biasing does fix the target name, and it damaged a **different** word in the same window:
+`commissure` -> `commasure` with only `Courchesne` in the list. Adding `commissure` to the
+list did not restore it -- it removed the token altogether. Disfluency markers were unaffected
+throughout (10 filled pauses in every run).
+
+One 90 s window, so the direction is measured but not established. What is established is that
+the previous entry recorded the benefit without checking the cost.
+
+#### A fourth instance of D19 — this one self-inflicted (2026-09-01)
+
+An earlier version of this section claimed **"`--mode intended` spelled `Courchesne`
+correctly 4/4 with no hotwords at all"**, and D22 was written on that basis: take proper-noun
+spelling from the intended stream rather than from hotwords.
+
+It was wrong. The check counted occurrences with the regex `Courchesne`, which **matches
+inside `Courchesney`**. Re-run against exact token forms:
+
+| run | exact `Courchesne` | what the tokens actually are |
+|---|---|---|
+| verbatim, no hotwords | 0 | `Korshane` x2, `Korshesney` x2 |
+| **`--mode intended`** | **0** | **`Courchesney` x4** |
+| **`--hotwords Courchesne`** | **4** | `Courchesne` x4 |
+
+So the intended stream is *closer* than verbatim — it recovers the French shape of the name —
+but it is still wrong, consistently, four times out of four. **Hotwords produced the only
+correct spelling in any run.**
+
+That leaves a genuine trade-off with no clean side, which is why D22 was withdrawn rather
+than reversed:
+
+- **hotwords** get the target name exactly right, and damage a neighbouring word
+  (`commissure` -> `commasure`, then deleted when the list grew);
+- **the intended stream** costs nothing, damages nothing, and still misspells the name.
+
+The failure shape is the one §3 opens by warning about, committed here in this project's own
+measurement code rather than in a model integration: plausible output, a self-consistent
+number, a wrong conclusion, and no error message anywhere. The generalisation worth keeping is
+that **D19 applies to the verification as much as to the integration** — a substring test
+where an exact test was meant is the measurement-side equivalent of a generic loader that
+runs. Proper-noun checks in this project compare whole tokens.
+
+#### Dual-stream costs ~11%, not 100% (measured 2026-09-01)
+
+`transcribe_dual()` decodes both modes in one batched pass: they differ only by the decoder
+prompt prefix and share the encoder output, so the autoregressive decode runs once for both
+and each mode's word-timing cross-attention is captured inline. It is **ct2-only and v2-only**
+— it raises `NotImplementedError` otherwise — and only `longform_strategy="continuation"` is
+supported for it.
+
+Measured on `geisler.wav` 45:00–46:30, A100, warm cache, two trials each. `processing_time`
+is the package's own inference timer, not wall clock:
+
+| run | inference | RTFx |
+|---|---|---|
+| single verbatim | 2.451 s / 2.390 s | 36.7 / 37.7 |
+| dual (both streams) | 2.791 s / 2.595 s | 32.2 / 34.7 |
+
+The second transcript costs **~11%** more inference time (2.42 s → 2.69 s mean), against ~100%
+for a second sequential pass — so roughly **1.8× faster than two passes**, matching the ~1.9×
+the package documents. Both streams report the same `processing_time`, which is what one
+shared pass should look like.
+
+**Equivalence holds.** The dual run's verbatim stream is byte-identical to a separate
+`--mode verbatim` run (166 tokens), and its intended stream byte-identical to a separate
+`--mode intended` run (154 tokens). Timestamps differ on **2 of 332 bounds, by at most
+0.120 s** — the package documents exactly this: batching two rows is mathematically identical
+per row but differs at the ULP level, which can flip a rare near-tie token or timing on
+long-form audio. Which route ran is recorded in `asr.params.dual_route`.
+
+Flag counts confirm the modes did what they claim: 10 filled pauses in the verbatim stream,
+**zero** in the intended one. Tagging the second stream is a check, not decoration — a
+non-zero count there would mean `intended` had not cleaned anything.
+
+> **Do not use wall clock to size a SLURM request.** The first attempt at this comparison
+> read 19.1 s against 9.7 s and looked like dual costing 2×. Both figures were dominated by
+> model load and a sha256 over the source audio, and the dual run happened to go first and pay
+> a cold cache. The decode phases were ~3 s and ~2 s. `asr.performance` now records the
+> model's own timer for this reason.
 
 > **Do not benchmark CrisperWhisper through `transformers.pipeline`.** It has no `mode`
 > parameter, so verbatim output cannot be requested and the model looks like an ordinary
@@ -246,33 +343,36 @@ The cut is **"needs audio + GPU" vs. "pure data transformation."**
 Stage 1 is verbatim and lossless — **no cleaning, no filtering, no speaker assignment.**
 Anything recomputable from data is recomputed in stage 2.
 
-### Proposed file layout
+### File layout
+
+`[x]` exists, `[ ]` planned.
 
 ```
 src/
-  transcribe.py            # stage 1 CLI
-  annotate.py              # stage 1.5 CLI
-  render.py                # stage 2 CLI
+  [x] transcribe_audio.py      # stage 1 CLI (keeps its name: the SLURM wrappers call it)
+  [ ] annotate.py              # stage 1.5 CLI
+  [ ] render.py                # stage 2 CLI
   pipeline/
-    capabilities.py        # Capabilities dataclass, ModelSpec
-    registry.py            # REGISTRY: model_id -> ModelSpec
+    [x] capabilities.py        # Capabilities, ModelSpec, plan_for()
+    [x] registry.py            # REGISTRY: model_id -> ModelSpec, exact match only
     adapters/
-      base.py              # Adapter ABC
-      crisperwhisper2.py
-      granite41plus.py
-      mock.py              # capability-declaring fake, no weights
-    diarize.py             # pyannote wrapper
-    align.py               # forced-alignment gap-filler
-    schema.py              # raw JSON read/write + validation
-  render/
-    segment.py             # turns, within-turn anchors, sentences
-    speakers.py            # assignment + smoothing, name map
-    formats/
-      txt.py  plain.py  html.py  tex.py
-    templates/
-      coding.css  lecture.css
+      [x] base.py              # Adapter ABC, Word, AdapterResult, ErrorRange
+      [x] crisperwhisper2.py
+      [x] whisper.py           # generic openai/whisper-* only
+      [x] mock.py              # six capability-declaring fakes, no weights
+      [ ] granite41plus.py     # Phase 3
+    [x] chunking.py            # fixed-window segmentation + retry by subdivision
+    [x] flags.py               # filled_pause / vocalization / partial_word tagging
+    [x] diarize.py             # pyannote wrapper
+    [x] provenance.py          # hashes, revisions, package + git versions
+    [x] schema.py              # raw JSON build/read/write + validate
+    [x] orchestrator.py        # dispatch from the declaration; assembles the record
+    [x] preview.py             # stage-1 text preview, superseded by render.py
+    [ ] align.py               # forced-alignment gap-filler
+  [ ] render/                  # Phase 2: segment, speakers, formats, templates
 tests/
-  fixtures/golden.json     # committed; renderer tests need no models
+  [x] check_contract.py        # 31 dependency-free checks
+  [ ] fixtures/golden.json     # committed; renderer tests need no models
 ```
 
 ### CLI shapes
@@ -299,6 +399,8 @@ python src/render.py \
 
 ### The capability contract
 
+**Implemented** in `src/pipeline/capabilities.py`.
+
 ```python
 @dataclass(frozen=True)
 class Capabilities:
@@ -308,29 +410,56 @@ class Capabilities:
     silence_tokens:  bool          # emits explicit pause tokens
     longform:        Literal["native", "needs_chunking"]
     confidence:      bool
+    hotwords:        Literal["no", "untrained", "trained"] = "no"   # D21
 ```
+
+`hotwords` is the one field this sketch did not originally have. It exists because
+"the parameter is accepted" and "the parameter works" turned out to be different
+claims, and only the second is worth acting on -- exactly the D19 shape, found by
+reading the package source rather than by the run failing.
 
 ```python
 REGISTRY = {
   "nyralabs/CrisperWhisper2.0_large": ModelSpec(
-      adapter=CrisperWhisper2Adapter,
+      adapter="pipeline.adapters.crisperwhisper2:CrisperWhisper2Adapter",
       capabilities=Capabilities(
           word_timestamps="start_end", verbatim="selectable",
           speaker_labels=False, silence_tokens=False,
-          longform="native", confidence=True),
-      defaults={"backend": "ct2", "mode": "verbatim"}),
+          longform="native", confidence=False, hotwords="untrained"),
+      defaults={"backend": "auto", "mode": "verbatim"}),
 
+  # Registered refusals. A checkpoint that runs and quietly does the wrong
+  # thing is worse than one that will not run at all.
+  "unsloth/crisperwhisper": ModelSpec(unsupported="CrisperWhisper v1: ..."),
+  "kyr0/crisperwhisper-unsloth-mlx": ModelSpec(unsupported="MLX, D13: ..."),
   "ibm-granite/granite-speech-4.1-2b-plus": ModelSpec(
-      adapter=Granite41PlusAdapter,
-      capabilities=Capabilities(
-          word_timestamps="end_only", verbatim="no",
-          speaker_labels=True, silence_tokens=True,
-          longform="needs_chunking", confidence=False),
-      defaults={}),
+      unsupported="Adapter not implemented yet (Phase 3). Declared shape: ..."),
 }
 ```
 
-Orchestrator dispatch is driven entirely by the declaration:
+Adapters are named by import path and loaded lazily, so the registry imports on a
+machine with no ML stack -- otherwise the mock adapters cannot do their job.
+`load_adapter_class()` compares the adapter's own declaration against the registry's
+and refuses on drift: the two live in different files, and a stale capability
+misroutes exactly the way a stale name pattern did.
+
+Three rules retire bug 7 rather than merely discouraging it:
+
+1. **Lookup is exact**, case-folded to match how the Hub resolves ids. An unknown id
+   is refused with the supported list, never guessed at.
+2. **Known-bad checkpoints are registered refusals** carrying their reason.
+3. **The adapter re-verifies on load.** `CrisperWhisper2Adapter` calls the package's
+   own `detect_model_version()`, which reads the tokenizer's `[verbatim_1]` marker
+   without loading weights -- so a renamed or mirrored copy of v1 weights is caught
+   too, which a denylist alone would miss.
+
+`--adapter` forces an adapter for an unregistered checkpoint. It is deliberately
+explicit and is recorded as `asr.adapter_source: "override"`, so an unusual routing
+decision is visible in the record instead of inferred from a name at runtime.
+
+Orchestrator dispatch is driven entirely by the declaration (`plan_for()`, a pure
+function from a declaration to the work required, which is what makes it testable
+against the mocks):
 
 - `word_timestamps == "none"` → run forced alignment (`CrisperWhisperModel.forced_align()`)
 - `word_timestamps == "end_only"` → derive starts from the previous token's end.
@@ -344,28 +473,63 @@ Adding a model is a registry entry plus, at most, a thin adapter.
 
 ## 5. Raw JSON schema (v1)
 
+**Implemented** in `src/pipeline/schema.py`, with `validate()` checking structure,
+word index monotonicity, timing ordering and the speaker/speaker_source coupling.
+
 ```jsonc
 {
   "schema_version": "1.0",
-  "source":  { "audio_path": "...", "audio_sha256": "...", "duration_s": 3612.4 },
-  "run":     { "created_utc": "...", "device": "cuda:0", "slurm_job_id": "...",
-               "pipeline_version": "..." },
-  "asr":     { "model_id": "...", "revision": "<hf commit sha>", "backend": "ct2",
-               "mode": "verbatim", "capabilities": { ... }, "params": { ... } },
+  "source":  { "audio_path": "...", "audio_sha256": "...", "duration_s": 90.0,
+               // present only for a --start_time run: the working excerpt is a
+               // temp file that is deleted, so the *original* is named and hashed
+               "excerpt": { "start_time": "00:45:00", "end_time": "00:46:30",
+                            "offset_s": 2700.0, "timestamps_relative_to": "excerpt" } },
+  "run":     { "created_utc": "...", "device": "cuda", "hostname": "...",
+               "python": "3.11.x", "slurm_job_id": "...", "slurm_partition": "...",
+               "pipeline_version": { "commit": "...", "branch": "...", "dirty": false },
+               "packages": { "crisperwhisper": "2.0.2", "transformers": "...", ... } },
+  "asr":     { "model_id": "...", "revision": "<hf commit sha>",
+               "revision_source": "local cache",
+               "adapter": "CrisperWhisper2Adapter", "adapter_source": "registry",
+               "backend": "ct2", "granularity": "word", "timing_source": "native",
+               "capabilities": { ... }, "params": { "mode": "verbatim", ... },
+               "performance": { "processing_time_s": 2.79, "realtime_factor": 32.2 } },
   "diarization": { "model_id": "...", "revision": "...", "params": { ... } },
 
   "words": [
-    { "i": 0, "text": "So",   "start": 0.42, "end": 0.61,
-      "timing_source": "native", "speaker_source": null, "conf": 0.98, "flags": [] },
-    { "i": 1, "text": "[UM]", "start": 0.79, "end": 1.02,
-      "timing_source": "native", "speaker_source": null, "flags": ["filled_pause"] }
+    { "i": 0, "text": "So",   "start": 0.42, "end": 0.61, "timing_source": "native",
+      "speaker": null, "speaker_source": null, "conf": null, "flags": [] },
+    { "i": 1, "text": "[UM]", "start": 0.79, "end": 1.02, "timing_source": "native",
+      "speaker": null, "speaker_source": null, "conf": null, "flags": ["filled_pause"] }
   ],
 
+  "text":          "...",          // the model's own full text
   "speaker_turns": [ { "start": 0.0, "end": 41.2, "speaker": "SPEAKER_00" } ],
-  "intended_text": "...",          // second stream when dual-stream requested
-  "errors":        [ { "start": 900.0, "end": 1200.0, "message": "..." } ]
+  "secondary_stream": {            // present only with --dual_stream
+      "mode": "intended", "text": "...", "words": [ ... ] },
+  "errors":        [ { "start": 900.0, "end": 1200.0, "message": "..." } ],
+  "warnings":      [ "hotwords were supplied to a checkpoint that was never ..." ]
 }
 ```
+
+Three fields beyond the original sketch, each earned by something that went wrong:
+
+- **`revision_source`** — the local HF cache is consulted first, because it reports the
+  revision that *was used* and needs no network on a compute node. The Hub API is a
+  fallback and reports the current head, which is not the same claim. Saying which one
+  answered is the difference between provenance and decoration; the same goes for
+  `pipeline_version.dirty`.
+- **`granularity`** — `"word"` or `"chunk"`. `--timestamp_mode chunk` is a VRAM concession
+  for 8 GB cards where word-level alignments OOM. It coarsens the record, and stage 2
+  cannot be left to infer which it is reading.
+- **`warnings`** — the caveats were going to stderr and vanishing with the job log. The
+  untrained-hotword `UserWarning` (D21) is captured from the package and written here.
+- **`secondary_stream`** replaces the sketch's text-only `intended_text`. It carries word
+  timestamps, which D10 requires — both render profiles carry timestamps, and the lecture
+  profile renders the *intended* stream — and it is keyed by `mode` rather than by role, so
+  the record never has to assume which stream is primary.
+- **`performance`** — the model's own inference timer and the realtime factor it implies.
+  Phase 0 question 3 asks for exactly this, and wall clock cannot answer it (§3).
 
 - **`speaker` is absent from words by default.** Diarization turns are stored raw and assigned
   in stage 2, keeping assignment rules tunable. When the ASR supplies its own labels
@@ -600,9 +764,16 @@ Measured over 12 x 90 s windows with all three dissenters:
 
 Flags are candidates, not errors: expect real garbles (`Korshane`, `psychatology`, `ipsi`,
 `ambiguitonance`) mixed with formatting residue. Resolution is a separate step -- retrieval
-against course materials or an author database, then a targeted re-run with `hotwords`. Where
-resolution fails, mark the token rather than guessing; a `[NAME?]` flag is worth more to a
-coder than a confident wrong spelling.
+against course materials or an author database, then a targeted re-run. Where resolution
+fails, mark the token rather than guessing; a `[NAME?]` flag is worth more to a coder than a
+confident wrong spelling.
+
+**How the re-run should resolve a flagged token is open** (§10). Measured 2026-09-01 on the
+45:00 window, `hotwords` gave the only exactly-correct spelling of the probe name, and cost a
+neighbouring word to do it; `--mode intended` damaged nothing but still misspelled the name
+(`Courchesney`). Neither is a clean resolution step. The intended stream remains cheap enough
+to take from every dual-stream run and is worth keeping as evidence, but it does not settle a
+spelling on its own.
 
 Cost: ~78% on top of a Qwen primary, ~40% on top of CW2. Batch-only.
 
@@ -631,16 +802,32 @@ Capability contract, registry, `mock` adapter, CrisperWhisper 2 adapter, raw JSO
 full provenance. Keep pyannote. Bypass chunking when `longform == "native"`. Delete the MLX
 path and the MPS workaround. Update the SLURM wrapper and add the `prototype` profile.
 
-**Done (2026-08-31):** the CrisperWhisper 2 adapter — `CrisperWhisperTranscriber` now drives
-the `crisperwhisper` package directly instead of subclassing the transformers path, bypasses
-the 300 s segmentation via native long-form, and exposes `--mode` and `--hotwords`. Verified
-end to end: verbatim gives 10 markers on a 90 s window with per-word timestamps on every
-token including the markers; `--hotwords` fixes the proper noun while keeping all 10;
-`--mode intended` suppresses them.
+**Done (2026-08-31):** the CrisperWhisper 2 adapter — driving the `crisperwhisper` package
+directly instead of subclassing the transformers path, bypassing the 300 s segmentation via
+native long-form, and exposing `--mode` and `--hotwords`.
 
-**Still open in this phase:** capability contract, registry (bug 7 — the factory still
-substring-sniffs), `mock` adapter, schema v1 with provenance, deleting the MLX path (bug 17),
-and the SLURM `prototype` profile.
+**Done (2026-09-01):** capability contract, registry, `mock` adapters, raw JSON schema v1
+with provenance, and the MLX/MPS deletion. Laid out as §4 proposed, under `src/pipeline/`.
+
+Verified on `geisler.wav` 45:00–46:30 (A100, ct2 backend, `--no_diarize`):
+
+| run | tokens | filled pauses | untimed tokens | `Courchesne` |
+|---|---|---|---|---|
+| `--mode verbatim` | 166 | **10** | **0** | 0 (`Korshane`, `Korshesney` ×4) |
+| `--mode verbatim --hotwords ...` | 165 | 10 | 0 | 4 — and one unrelated word damaged, see §3 |
+| `--mode intended` | 154 | 0 | 0 | 4 |
+
+Ten markers on a 90 s window, per-word start and end on **every** token including the
+markers, and `intended` suppressing them: the reference expectations, reproduced through
+the new dispatch path. The three registry refusals (`unsloth/crisperwhisper`,
+`kyr0/crisperwhisper-unsloth-mlx`, and `--mode verbatim` against `openai/whisper-large-v3`)
+each exit 2 with the reason. `tests/check_contract.py` — 31 checks, no dependencies —
+covers the dispatch decisions on both the Mac and the cluster.
+
+**Still open in this phase:** the SLURM `prototype` profile, and the forced-alignment
+gap-filler (`align.py`), which the contract dispatches to but which is not built — no
+registered real model declares `word_timestamps="none"` yet, and the run records the gap
+as a warning rather than pretending to have timings.
 
 ### Phase 2 — Stage 2 renderer
 
@@ -664,7 +851,7 @@ for this project.**
 
 ## 9. Bugs in the current code
 
-### Fixed (2026-08-27 → 08-31)
+### Fixed (2026-08-27 → 09-01)
 
 Kept here for the reasoning, not the code. Each was found by running real audio, not by
 reading source.
@@ -679,22 +866,27 @@ reading source.
 | 13 | Failed segments exited 0 | One lecture lost **12.7%** of its audio, visible only by grepping the JSON. Retry-by-subdivision recovered every range (11,588 → 13,193 words); unrecoverable ranges now force a non-zero exit |
 | 15 | `mlx_whisper` and `pyannote` imported at module scope | An optional backend took the whole script down — the second cost a debugging cycle *after* the first was fixed |
 | 16 | Default model was `unsloth/crisperwhisper` (**v1**) | v1 silently ignores `--mode` and `--hotwords` and emits no markers. It warns; the run still succeeds |
+| 2 | `Diarizer.run` referenced `diarization` in its `except` before assignment | A `NameError` replaced the real exception **every time**, so no diarization failure ever reported its own cause |
+| 4 | `TextCleaner` ran inline in stage 1 | Destroyed information before it was written to disk. Now affects the preview text only; the JSON is always verbatim (D3) |
+| 5 | Chunks that cleaned to empty were `continue`d | Punched silent holes in the timeline. Moot: nothing is dropped from the record |
+| 6 | `_adjust_timestamps` used the absolute `end_time` as the fallback for a missing relative end | Invented a timestamp and hid the gap from everything downstream. A missing bound now stays `None` |
+| 7 | `TranscriberFactory` substring-sniffed model names | `"crisper" in name` routed **v1** into the v2 path, where `--mode`/`--hotwords` are ignored and the run exits 0. `"mlx" in name` and `"granite-speech" in name` still referenced classes deleted in e0e2542, so either id raised `NameError`. Replaced by the registry |
+| 17 | The MLX path survived D13 | Deleted, with `src/transcribe_audio_mac.py` and MPS device selection. The chunk-level pin it motivated went in e0e2542; the surviving `--timestamp_mode` flag is generic-Whisper-only and has its own justification (`docs/environments.md`), so it is kept and recorded as `asr.granularity` |
 
 **The recurring shape:** a module-scope import of an optional dependency (15), a silent
-success that disables a feature (16), and a failure that exits 0 (13). None announced itself.
+success that disables a feature (16, 7), and a failure that exits 0 (13). None announced
+itself. The contract's job is to make each shape structurally impossible rather than
+individually remembered: refuse instead of guessing, verify the checkpoint instead of
+trusting its name, and put every caveat in the output file instead of a job log.
 
 ### Outstanding
 
-2. `Diarizer.run` references `diarization` in its `except` block before assignment — a
-   `NameError` that **masks the real exception**.
+Bugs 3 and 9 both live in `src/pipeline/chunking.py` now, documented in its module
+docstring. Neither is fixable without a real `needs_chunking` model to verify against,
+which arrives in Phase 3.
+
 3. Fixed 300 s boundaries cut mid-word. Bypassed for CrisperWhisper (native long-form) but
    still applies to any `needs_chunking` model, which should split on silence.
-4. `TextCleaner` runs inline in stage 1 and destroys information before it is written. Moves
-   to `annotate.py` as a tagger, not a deleter.
-5. Chunks that clean to empty are `continue`d, silently punching holes in the timeline.
-6. `_adjust_timestamps` uses absolute `end_time` as the fallback for a missing relative end.
-7. `TranscriberFactory` substring-sniffs model names (`"crisper" in name`, `"mlx" in name`);
-   replaced by the registry in Phase 1.
 9. Per-segment `librosa.load(path, offset=...)` re-decodes a compressed source from byte zero.
    Measured wall-to-wall: 79 min of `.m4a` took **91 min** against **57 min** for the same
    audio as `.wav` — a **1.6x penalty** for 3.6 s of ffmpeg. Bypassed for CrisperWhisper,
@@ -704,8 +896,6 @@ success that disables a feature (16), and a failure that exits 0 (13). None anno
     rule. On 300 s where the reference is 545 words, `parakeet-ctc-0.6b` returned 63 chunked
     and 566 unchunked; `granite-470m-turboctc` 68 against 581. Chunking discards ~88% of the
     content silently.
-17. The MLX path (`MLXCrisperWhisperTranscriber`) is still present despite D13. Delete it in
-    Phase 1 along with the chunk-level timestamp workaround it motivated.
 
 ---
 
@@ -723,21 +913,32 @@ success that disables a feature (16), and a failure that exits 0 (13). None anno
 | **Diarization at turn boundaries** | Short filler tokens near a speaker change are where max-overlap assignment is noisiest; hence smoothing within pause-bounded runs. |
 | **IRB / data governance** | Interview recordings are human-subjects data and stage 1 moves them to shared cluster storage. Assumed covered by the existing protocol; flagged because this pipeline automates the transfer. |
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
+| **Proper nouns: how to resolve a flagged token** | **Opened 2026-09-01, and genuinely open.** On the 45:00 window, `hotwords` produced the only exactly-correct spelling of the probe name and corrupted a neighbouring word doing it; `--mode intended` corrupted nothing and still got the name wrong (`Courchesney` x4). §7b's resolution step therefore has no good default. Worth measuring over the 12-window sweep, comparing **exact token forms**, not substrings: how often does each route land the correct spelling, and how often does hotword biasing damage a non-target token? D21's cost is established; the benefit's reliability is not. |
+| **Forced alignment (`align.py`)** | Dispatched to but not built. No registered real model declares `word_timestamps="none"`, so nothing needs it yet; the run records the gap in `warnings` rather than emitting untimed words that look timed. Build it when a model needs it, using `CrisperWhisperModel.forced_align()`. |
+| **CrisperWhisper `confidence`** | Declared `False`. `TranscriptionResult` has no per-word confidence field, so `conf` is always null. Worth revisiting if a later package version exposes one — coders benefit from knowing which tokens the model was unsure of. |
 
 ---
 
 ## 11. Next action
 
-**Phase 0.** Two viable routes, whichever is ready first:
+**Phase 2: the renderer.** Stage 1 now emits schema v1, so the highest-value next step is to
+generate one real raw JSON from a full recording and commit it as `tests/fixtures/golden.json`
+(plan §7). Every part of stage 2 — turn grouping, within-turn anchors, speaker assignment and
+smoothing, line numbering, print CSS, both profiles, all format backends — is then a pure
+function over that file, developed and tested on any machine in milliseconds with no GPU.
 
-- **CPU Docker container on the Mac** — available now. Dockerfile with
-  `crisperwhisper[transformers]`, `transformers`, `pyannote.audio`, `librosa`, `ffmpeg`.
-- **RTX 3070 VM** — once provisioned. Use `crisperwhisper[ct2]` instead, which additionally
-  exercises the production backend and `transcribe_dual`, and serves as the VM's acceptance
-  test (§7).
+Two smaller things worth doing alongside, both cheap:
 
-Both need a 60–90 s interview clip and a 60–90 s lecture clip, plus `HF_TOKEN` from `.env` for
-pyannote. No host installs either way. Nothing in `src/` changes until Phase 1.
+- **The `prototype` SLURM profile.** `run_transcription.sh` still requests 8-hour GPU jobs,
+  which is the shape a scheduler defers. A `--time=00:15:00` single-GPU job is what backfill
+  slots in immediately, and the verification runs in §8 show minutes of GPU time is all a
+  90 s window needs.
+- **Re-derive the pause threshold.** Bug 8 is fixed, so the 0.3 s default was measured against
+  distorted data and needs redoing against a current run (§6).
+
+Phase 0's remaining question — whether Granite 4.1-plus can combine timestamp and
+speaker-attribution modes in one prompt — is Phase 3's problem, and the registry already holds
+its declared shape so the adapter has a target to hit.
 
 ---
 

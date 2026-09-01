@@ -7,7 +7,7 @@ START_TIME=""
 END_TIME=""
 EXTRA_FLAGS=""
 OUTPUT_DIR="./transcripts"
-CONDA_ENV="audio-transcribe"
+CONDA_ENV="cw2native"
 MODEL=""
 
 # Help Function
@@ -19,10 +19,11 @@ usage() {
     echo "  -c : Compute mode (gpu, cpu). Default: gpu"
     echo "  -s : Start time (e.g., 00:05:00)"
     echo "  -e : End time (e.g., 00:10:00)"
-    echo "  -E : Conda env to activate. Default: audio-transcribe"
-    echo "       Use audio-transcribe-crisper for CrisperWhisper models."
-    echo "  -M : ASR model. Default: the script's own default (unsloth/crisperwhisper)"
-    echo "       e.g. openai/whisper-large-v3, ibm-granite/granite-speech-3.3-8b"
+    echo "  -E : Mamba env to activate. Default: cw2native (CrisperWhisper 2)"
+    echo "       Use audio-transcribe for diarization (it has pyannote)."
+    echo "  -M : ASR model. Must be a registered id; run"
+    echo "       'python src/transcribe_audio.py --help' for the list."
+    echo "       Default: nyralabs/CrisperWhisper2.0_large"
     exit 1
 }
 
@@ -90,7 +91,7 @@ mkdir -p logs
 mkdir -p "$OUTPUT_DIR"
 
 # Submit
-echo "Conda environment: $CONDA_ENV"
+echo "Mamba environment: $CONDA_ENV"
 [ -n "$MODEL" ] && echo "Model: $MODEL"
 
 sbatch \
