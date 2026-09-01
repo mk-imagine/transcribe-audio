@@ -67,6 +67,8 @@ Settled. Each entry records what would reopen it.
 | D1 | **Split into three commands**: `transcribe` → `annotate` → `render` | Stage 1 queues on SLURM; stage 2 must be instant. Never re-queue a cluster job to change a pause threshold. | — |
 | D2 | **Capability contract, not a model-name factory** | Plug-and-play comes from adapters declaring what they provide, with the orchestrator filling gaps. | — |
 | D3 | **Stage 1 is verbatim and lossless.** No cleaning, filtering, or speaker assignment. | Cleaning in stage 1 destroys information before it is ever written to disk. | — |
+| D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
+| D18 | **Proper-noun detection by three-dissenter conjunction (§7b), compared on a fluent view.** | Glossaries cannot be built ahead of an arbitrary lecture, but cross-model disagreement localises garbles without one. Dissenters must come from independent lineages. | A single model gains reliable proper-noun accuracy |
 | D4 | **Default model: `nyralabs/CrisperWhisper2.0_large`** | Verbatim is its explicit training objective, not an accident of its corpus. Only candidate with a documented verbatim/intended switch. | Phase 0 shows poor disfluency retention on real audio |
 | D5 | **Second adapter: `ibm-granite/granite-speech-4.1-2b-plus`** | Apache 2.0, and exercises three capability paths CW2 does not (`end_only` timestamps, silence tokens, native speaker labels) — which is what proves the contract is real. | — |
 | D6 | **Not pursuing Reverb ASR** | `verbatimicity` is the nicest design of the three, but it needs a WeNet fork as a second inference stack *and* has no documented word timestamps, so it needs an aligner anyway. | Its integration cost drops, or CW2 and Granite both fail |
@@ -132,6 +134,59 @@ Source: HuggingFace model card. Released **2026-04-28**. **Apache 2.0**.
 - ~2 B params ≈ 4 GB bf16
 - **OPEN:** whether timestamp mode and speaker-attribution mode can be combined in one prompt.
   Undocumented, and this project needs both. Phase 0 question 2.
+
+### Measured behaviour (2026-08-31, real audio)
+
+Two ~80 min recordings, 12 x 90 s windows, A100.
+
+**CrisperWhisper 2 through its own package does what this project needs.** With
+`mode="verbatim"` (the default) it emits bracketed disfluency tags, and four of §5's five
+categories appear in real output:
+
+| category | count over 12 windows | example |
+|---|---|---|
+| `filled_pause` | **121** (`[UH]` x83, `[UM]` x38) | `[UM] including Bob Knight and Eric ... [UH] it's pronounced` |
+| `repetition` | 23 | "not not mirror images", "the the bone" |
+| `partial_word` | 12 | "maybe the p-", "the pro- process of de- developmental" |
+| `repair` | derivable | inferable from marker positions + repetitions; not tagged directly |
+| `vocalization` | 1 | `[laughter]` — **lowercase**, unlike `[UH]`/`[UM]`; match tags case-insensitively |
+
+Tag inventory over those 12 windows is exactly `{uh: 83, um: 38, laughter: 1}`. Vocalizations
+are supported but rare in this material; an uppercase-only regex will miss them.
+
+`word_timestamps=True` and the markers coexist. `hotwords=[...]` fixes proper nouns in the same
+pass: without it "Eric Korshane ... pronounced Korshesney"; with it "Eric Courchesne ...
+pronounced Courchesne", keeping all 22 markers in that window. `temperature_fallback=True` is
+on by default and no looping was observed (0.0% duplicate 8-grams on all 12 windows).
+Throughput **38x realtime** via the CTranslate2 backend.
+
+> **Do not benchmark CrisperWhisper through `transformers.pipeline`.** It has no `mode`
+> parameter, so verbatim output cannot be requested and the model looks like an ordinary
+> cleaned-text ASR. A ten-model comparison run that way produced **zero** disfluencies from
+> CW1 and CW2 and led to a wrong conclusion — that no accurate model preserves disfluencies
+> and fine-tuning was required. The same weights through the `crisperwhisper` package emit
+> 121 filled pauses on the same audio. The pipeline route is also **3x slower** (12x realtime
+> against 38x).
+
+### Other models measured
+
+Through `transformers.pipeline`, on the same 12 windows:
+
+| model | filled pauses | notes |
+|---|---|---|
+| `granite-speech-3.3-2b` | 27 | only seq2seq model to emit them; **drops ~35%** of one window, one empty output |
+| `wav2vec2-large-robust-ft-swbd-300h` | 9 + 8 (2 windows) | Switchboard-only fine-tuning; uncased, unpunctuated, mangles proper nouns |
+| `granite-speech-3.3-8b` | 10 | **loops on 4 of 12 windows**, up to 71% duplicate 8-grams |
+| `Qwen3-ASR-1.7B` | 0 | best WER (4.95%), Apache-2.0, 19x realtime, no looping |
+| `granite-speech-4.1-2b` / `-plus` | 0/1 | unsteerable: verbatim prompts change nothing |
+| `parakeet-ctc-{0.6b,1.1b}` | 0 | Fisher/Switchboard in a 15-dataset mixture is not enough |
+| `nyralabs/CrisperWhisper2.0_large` | 0 | **artefact of the wrong API — see above** |
+
+Two conclusions survive. Disfluency preservation tracks **fine-tuning corpus**, not
+architecture or size: `wav2vec2-swbd` (Switchboard as its sole fine-tuning set) emits them
+where the identically-sized LibriSpeech checkpoint emits none. And **prompting never works** —
+neither Granite 4.1 nor Qwen3-ASR's documented context injection changes disfluency output at
+all, though Qwen's context injection *does* fix proper nouns.
 
 ### Considered and rejected
 
@@ -314,8 +369,30 @@ detector — repurposed from **deleter to tagger**.
 - **Within-turn anchors** every `--anchor-interval` seconds, snapped to the nearest sentence or
   pause boundary, so a long turn stays citable.
 - **Sentence boundary** = terminal punctuation ∨ pause > threshold ∨ speaker change.
-  Verbatim text has sparse punctuation, so the pause rule carries more weight in the coding
-  profile than the lecture one.
+
+#### Measured against real output (2026-08-28)
+
+Two ~80 min recordings, CrisperWhisper word-level timestamps on an A100, `--clean_mode none`:
+
+| Signal | Interview (14,709 w, 182 wpm) | Lecture (11,588 w, 147 wpm) |
+|---|---|---|
+| terminal punctuation | every 4.7 s | every 7.0 s |
+| pause > 0.2 s | every 2.8 s | every 2.8 s |
+| **pause > 0.3 s** | **every 5.1 s** | **every 4.5 s** |
+| pause > 0.5 s | every 14.5 s | every 12.8 s |
+| speaker change | every 43.6 s | every 60.7 s |
+
+**Punctuation is not sparse.** It alone yields a sentence every 4.7–7.0 s, so it is the primary
+signal and the pause rule supplements it — the reverse of what was assumed here previously.
+
+**Provisional default: `--pause-threshold 0.3`.** Both recordings agree closely despite
+differing genre and speech rate; 0.2 s fragments sentences, 0.5 s merges them.
+
+**Do not harden that number yet.** 59% of inter-word gaps are exactly 0.000 s in both files —
+an artifact of `_adjust_pauses` (bug 8), which collapses every gap below `split_threshold`
+(0.12 s) and shortens the rest by the same amount. The 0.3 s figure is measured against
+already-distorted data and corresponds to roughly 0.42 s of real silence. Re-derive it once
+pause adjustment moves to stage 2.
 
 All thresholds are CLI flags. Re-rendering is instant, so tune them against real transcripts
 rather than guessing up front.
@@ -454,6 +531,54 @@ dialogue and monologue stress disfluency handling very differently.
 
 ---
 
+## 7b. Proper-noun detection
+
+Neither CW2 nor Qwen3-ASR spells unfamiliar researcher names correctly unaided (`Korshane`,
+`Korschen` for *Courchesne*), and a glossary cannot be assembled in advance for an arbitrary
+lecture. Detection therefore has to come from the audio, and **cross-model disagreement
+localises it** without any prior list.
+
+**Method.** Transcribe with the primary plus three small dissenters from *independent*
+lineages, and flag any token where **all** dissenters disagree. The conjunction is what
+supplies precision: a single dissenter flags 8.8% of tokens (mostly contraction formatting),
+three flag ~1%.
+
+| dissenter | lineage | decoder | RTFx | notes |
+|---|---|---|---|---|
+| `Audio8/ARK-ASR-0.6B` | AutoArk | causal LM | 36 | **30 s audio cap** — must be called in 30 s slices |
+| `nvidia/parakeet-tdt-0.6b-v3` | NVIDIA NeMo | TDT | 182 | |
+| `ibm-granite/granite-speech-5.0-470m-turboctc` | IBM | CTC | 7187 | |
+
+Independence matters more than count: `parakeet-ctc` and `parakeet-tdt` share an encoder and
+training mixture, and Canary shares them too (its dataset list is byte-identical to
+Parakeet's), so their errors correlate. Swapping a Parakeet for ARK bought a real gain
+(2.3% -> 1.2% against Qwen).
+
+**Comparison must run on a *fluent view* of the primary.** With CW2 emitting disfluencies the
+dissenters cannot match, raw comparison flags every `[UH]`. Before aligning: drop bracketed
+tags (case-insensitive), drop trailing-hyphen partial words, collapse adjacent repetitions,
+split hyphens/dashes, strip apostrophes, map number words and digits to a single class, and
+expand verbatim contractions (`gonna` -> `going to`). Keep an index map so flags report against
+the original tokens. Disfluency tokens then cannot be flagged, which is correct: no dissenter
+can confirm them.
+
+Measured over 12 x 90 s windows with all three dissenters:
+
+| primary | flagged | note |
+|---|---|---|
+| Qwen3-ASR | **0.8%** | speaks the same normalised register as the dissenters |
+| CrisperWhisper 2 (verbatim) | **2.0%** | residue is largely CW2 transcribing discourse markers ("Okay.", "Right.") the dissenters drop -- i.e. CW2 being *more* complete |
+
+Flags are candidates, not errors: expect real garbles (`Korshane`, `psychatology`, `ipsi`,
+`ambiguitonance`) mixed with formatting residue. Resolution is a separate step -- retrieval
+against course materials or an author database, then a targeted re-run with `hotwords`. Where
+resolution fails, mark the token rather than guessing; a `[NAME?]` flag is worth more to a
+coder than a confident wrong spelling.
+
+Cost: ~78% on top of a Qwen primary, ~40% on top of CW2. Batch-only.
+
+---
+
 ## 8. Phasing
 
 ### Phase 0 — Prototype (CPU container, deployment-size models)
@@ -512,6 +637,40 @@ Fix or delete during the rewrite; the first two are costing data today.
 5. Chunks that clean to empty are `continue`d, silently punching holes in the timeline.
 6. `_adjust_timestamps` uses absolute `end_time` as the fallback for a missing relative end.
 7. `TranscriberFactory` substring-sniffs model names; replaced by the registry.
+8. `_adjust_pauses` runs in stage 1 and is lossy. It redistributes every gap below
+   `split_threshold` (0.12 s) into the adjacent words and shortens larger gaps by the same
+   amount. Measured on two ~80 min recordings, **59% of inter-word gaps come out exactly
+   0.000 s** — destroying the pause signal stage 2's sentence rule depends on. Same defect as
+   bug 4: pure data transformation belongs in stage 2, not ahead of the write.
+9. Per-segment `librosa.load(path, offset=...)` re-decodes a compressed source from byte zero
+   for every segment, so decode cost grows with duration. Measured wall-to-wall on the same
+   file and GPU: 79 min of `.m4a` took **91 min**, against **57 min** for the same audio
+   pre-converted to `.wav` — a **1.6x penalty**, for 3.6 s of ffmpeg. (An earlier draft said
+   ~4x; that compared a transcription-only rate against a wall time including diarization.)
+   Decode once into a working array, or seek with ffmpeg.
+10. `Diarizer` stored `model_name` but **never used it**: both `Pipeline.from_pretrained`
+    calls hardcoded `community-1`, so `--diarizer_model` was inert, and the log line announced
+    `speaker-diarization-3.1` — a third model, loaded by nobody. Any provenance taken from
+    those logs named the wrong component. *(Fixed.)*
+11. The Whisper pipeline passed **no loop guards**. Whisper's decoder falls into repetition
+    traps: measured across 12 sampled 90 s windows, CrisperWhisper 2 looped on 3 of them,
+    duplicating 46-59% of its 8-grams and once emitting "anterior commissure" 37 times in a
+    single window. `compression_ratio_threshold` + temperature fallback eliminate it (0.0%
+    duplicate 8-grams). Note these exist only in Whisper's *sequential* path and are rejected
+    outright by transformers 4.37.2, so they must be capability-gated. *(Fixed.)*
+12. The Granite adapter had three independent defects, each fatal: `sampling_rate` passed to
+    `GraniteSpeechProcessor.__call__` (which has no such parameter) reached the tokenizer and
+    failed every segment; `max_new_tokens=500` truncated anything past ~90 s; and the decode
+    read the whole generated sequence, pasting the chat template into the transcript as if it
+    were speech. *(All fixed.)*
+13. A failed segment became an error placeholder and the run **exited 0**. One lecture lost
+    12.7% of its audio this way, visible only by grepping the JSON. The failures are also
+    recoverable: the same window fails as a whole and succeeds as two halves, because the
+    trigger is where the model's internal 30 s chunk boundaries land. Retry by subdivision
+    recovered every lost range; unrecoverable ranges now force a non-zero exit. *(Fixed.)*
+14. CTC models must **not** be given `chunk_length_s`. Measured on 300 s where the reference
+    is 545 words: `parakeet-ctc-0.6b` returned 63 words chunked and 566 unchunked;
+    `granite-470m-turboctc` 68 against 581. Chunking silently discards ~88% of the content.
 
 ---
 
@@ -521,7 +680,11 @@ Fix or delete during the rewrite; the first two are costing data today.
 |---|---|
 | **Granite timestamp + speaker mode combination** | Undocumented. Phase 0 question 2. |
 | **Coding margin layout** | Right-hand column vs. double-spaced. Ask the student coders. |
-| **Verbatim punctuation sparsity** | Sentence subdivision may lean mostly on pauses. Check against real output before fixing a default. |
+| **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
+| **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (interview) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
+| **Diarization model choice** | **Settled 2026-08-31: stay on community-1.** DiariZen v1/v2 benchmarked against it on 10 min excerpts: same speaker counts, near-identical speech totals and runtime (~12 s), 20% fewer/longer segments on the lecture. Not enough to justify its install — a separate env pinned to torch 2.1.1, a vendored pyannote fork, and an `LD_LIBRARY_PATH` workaround for a Rocky 8 `libstdc++` mismatch. Both DiariZen checkpoints are CC-BY-NC; community-1 is CC-BY-4.0. No DER computed: no reference labels. |
+| **Fine-tuning for disfluencies** | **Dropped 2026-08-31.** Premised on no accurate model emitting disfluencies, which was an artefact of calling CrisperWhisper through `transformers.pipeline`. `mode="verbatim"` supplies them natively. The teacher-forced groundwork (Qwen3-ASR sits at ~1% filler probability against CW2's ~0.1%) is recorded in case the premise returns. |
+| **Vocalization coverage** | Only `[laughter]`, once, in 12 windows of lecture + interview audio. Whether CW2 tags coughs/breaths is untested — this material may simply contain none. |
 | **Diarization at turn boundaries** | Short filler tokens near a speaker change are where max-overlap assignment is noisiest; hence smoothing within pause-bounded runs. |
 | **IRB / data governance** | Interview recordings are human-subjects data and stage 1 moves them to shared cluster storage. Assumed covered by the existing protocol; flagged because this pipeline automates the transfer. |
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
