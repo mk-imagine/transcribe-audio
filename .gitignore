@@ -89,3 +89,6 @@ GEMINI.md
 
 # Private Data
 transcripts/
+# Python bytecode from running the pipeline in-tree
+__pycache__/
+*.py[cod]
