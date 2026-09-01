@@ -396,308 +396,102 @@ class WhisperTranscriber(BaseTranscriber):
             logger.error(f"Whisper pipeline error: {e}")
             raise e
 
-class CrisperWhisperTranscriber(WhisperTranscriber):
-    """Transcriber for CrisperWhisper models with pause adjustment.
+class CrisperWhisperTranscriber(BaseTranscriber):
+    """CrisperWhisper driven through its own `crisperwhisper` package.
 
-    CrisperWhisper is optimized for accurate word-level timestamps with proper
-    pause handling. This class extends WhisperTranscriber with CrisperWhisper-specific
-    post-processing to adjust pause timings between words.
+    Deliberately NOT a subclass of WhisperTranscriber. The transformers ASR
+    pipeline has no `mode` parameter, so verbatim output cannot be requested
+    through it: the same weights return ordinary cleaned text and the model
+    looks like any other ASR. Measured on identical audio, the package emits
+    121 filled pauses where the pipeline emitted zero, and runs ~3x faster
+    via its CTranslate2 backend.
 
-    Based on: https://huggingface.co/nyrahealth/CrisperWhisper
+    The package also supplies natively what the generic path has to bolt on:
+      mode="verbatim"          disfluency markers ([UH], [UM], [laughter])
+      hotwords=[...]           vocabulary biasing for names/technical terms
+      temperature_fallback     repetition-loop detection and retry
+      longform_strategy        long audio without our 300s segmentation
+      word_timestamps          per-word times, markers included
+
+    Generic openai/whisper-* checkpoints keep using WhisperTranscriber.
     """
 
     def __init__(self, model_name: str, device: Union[str, torch.device],
-                 return_timestamps: Union[str, bool] = "word",
-                 adjust_pauses: bool = False):
-        # Word-level is the mode CrisperWhisper is built for, and the only one
-        # that works: asking it for chunk-level timestamps makes it emit a
-        # degenerate run of "(" characters and a single (None, None) chunk,
-        # which then crashes speaker assignment. _adjust_pauses() below also
-        # expects per-word chunks. Chunk-level stays reachable via
-        # --timestamp_mode chunk for platforms that need it.
-        super().__init__(model_name, device, return_timestamps=return_timestamps)
-        self.split_threshold = 0.12  # Default pause split threshold from model card
-        self.adjust_pauses = adjust_pauses
-        logger.info(
-            f"CrisperWhisper initialized ({return_timestamps}-level timestamps, "
-            f"pause adjustment: {'on' if adjust_pauses else 'off (raw timestamps)'})"
-        )
-
-    def _transcribe_segment(self, audio_path: str, start_time: float, end_time: float) -> List[Dict]:
-        """Transcribe a segment using CrisperWhisper."""
-        chunks = super()._transcribe_segment(audio_path, start_time, end_time)
-
-        # Pause adjustment is a lossy transform, so it is off by default: it
-        # collapses every inter-word gap below split_threshold to zero and
-        # shortens the rest by the same amount. Measured over two ~80 min
-        # recordings that zeroed 59% of all gaps -- destroying the silence
-        # durations that sentence segmentation and hesitation analysis both
-        # read. Transcription emits raw model timestamps; anything recomputable
-        # from them belongs in a later rendering pass, which can call
-        # _adjust_pauses() itself.
-        if self.adjust_pauses:
-            return self._adjust_pauses(chunks)
-
-        return chunks
-
-    def _adjust_pauses(self, chunks: List[Dict]) -> List[Dict]:
-        """
-        Adjust pause timings by distributing pauses up to the threshold evenly between adjacent words.
-
-        This implements the pause adjustment algorithm from the CrisperWhisper model card.
-        Pauses between words are redistributed to avoid awkward timing gaps:
-        - Pauses <= split_threshold: distributed evenly (50/50) between adjacent words
-        - Pauses > split_threshold: only split_threshold/2 distributed to each word
-
-        Args:
-            chunks: List of transcription chunks with timestamps
-
-        Returns:
-            List of chunks with adjusted timestamps
-        """
-        if len(chunks) <= 1:
-            return chunks
-
-        adjusted_chunks = chunks.copy()
-
-        for i in range(len(adjusted_chunks) - 1):
-            current_chunk = adjusted_chunks[i]
-            next_chunk = adjusted_chunks[i + 1]
-
-            # Extract timestamps
-            current_ts = current_chunk.get("timestamp")
-            next_ts = next_chunk.get("timestamp")
-
-            # Skip if timestamps are missing or malformed
-            if not current_ts or not next_ts:
-                continue
-            if not isinstance(current_ts, (list, tuple)) or len(current_ts) != 2:
-                continue
-            if not isinstance(next_ts, (list, tuple)) or len(next_ts) != 2:
-                continue
-
-            current_start, current_end = current_ts
-            next_start, next_end = next_ts
-
-            # Skip if None values
-            if current_end is None or next_start is None:
-                continue
-
-            # Calculate pause duration
-            pause_duration = next_start - current_end
-
-            if pause_duration > 0:
-                # Determine how much to distribute
-                if pause_duration > self.split_threshold:
-                    distribute = self.split_threshold / 2
-                else:
-                    distribute = pause_duration / 2
-
-                # Adjust current chunk end time
-                adjusted_chunks[i]["timestamp"] = (current_start, current_end + distribute)
-
-                # Adjust next chunk start time
-                adjusted_chunks[i + 1]["timestamp"] = (next_start - distribute, next_end)
-
-        return adjusted_chunks
-
-class MLXCrisperWhisperTranscriber(BaseTranscriber):
-    """Transcriber for CrisperWhisper using MLX (optimized for Apple Silicon).
-
-    This implementation uses the mlx_whisper library which is optimized for Apple Silicon
-    and avoids the compatibility issues with the standard transformers pipeline.
-
-    Model: kyr0/crisperwhisper-unsloth-mlx
-    """
-
-    def __init__(self, model_name: str, device: Union[str, torch.device]):
+                 mode: str = "verbatim", hotwords: Optional[List[str]] = None):
         super().__init__(model_name, device)
-        # Convert to MLX model path if needed
-        if "kyr0" not in model_name.lower():
-            self.mlx_model = "kyr0/crisperwhisper-unsloth-mlx"
-            logger.info(f"Using MLX model: {self.mlx_model}")
-        else:
-            self.mlx_model = model_name
-
-        if mlx_whisper is None:
-            raise RuntimeError(
-                "mlx_whisper is not installed. The MLX CrisperWhisper backend "
-                "requires Apple Silicon; use --model unsloth/CrisperWhisper for "
-                "the transformers/CUDA backend."
-            )
-
-        logger.info(f"MLX CrisperWhisper initialized")
-
-    def _transcribe_segment(self, audio_path: str, start_time: float, end_time: float) -> List[Dict]:
-        """Transcribe a segment using MLX CrisperWhisper with word-level timestamps."""
-        try:
-            # Load audio segment
-            audio_array, sr = librosa.load(
-                audio_path,
-                sr=16000,
-                offset=start_time,
-                duration=end_time - start_time
-            )
-        except Exception as e:
-            logger.error(f"Failed to load audio segment: {e}")
-            return []
-
-        if len(audio_array) == 0:
-            return []
-
-        try:
-            # MLX Whisper transcription with word-level timestamps
-            result = mlx_whisper.transcribe(
-                audio_array,
-                path_or_hf_repo=self.mlx_model,
-                word_timestamps=True,
-                verbose=False
-            )
-
-            logger.info(f"  MLX result keys: {result.keys() if isinstance(result, dict) else type(result)}")
-
-            # Extract word-level segments
-            segments = result.get("segments", [])
-            chunks = []
-
-            for segment in segments:
-                # Get words from segment
-                words = segment.get("words", [])
-                if words:
-                    # Create chunk for each word
-                    for word_info in words:
-                        chunks.append({
-                            "timestamp": (word_info["start"], word_info["end"]),
-                            "text": word_info["word"]
-                        })
-                else:
-                    # Fallback to segment-level if no words
-                    chunks.append({
-                        "timestamp": (segment["start"], segment["end"]),
-                        "text": segment["text"]
-                    })
-
-            # Fallback if no segments but text exists
-            if not chunks and "text" in result and result["text"].strip():
-                logger.warning(f"  No segments returned, but got text. Creating single chunk.")
-                chunks = [{
-                    "timestamp": (0.0, end_time - start_time),
-                    "text": result["text"]
-                }]
-
-            logger.info(f"  Returning {len(chunks)} chunks")
-            return chunks
-
-        except Exception as e:
-            logger.error(f"MLX CrisperWhisper error: {e}")
-            raise e
-
-class GraniteTranscriber(BaseTranscriber):
-    """Transcriber using IBM Granite Speech models"""
-    def __init__(self, model_name: str, device: Union[str, torch.device]):
-        super().__init__(model_name, device)
+        self.mode = mode
+        self.hotwords = hotwords or []
         self._load_model()
 
     def _load_model(self):
-        logger.info(f"Loading IBM Granite ASR Model: {self.model_name} on {self.device}")
-        from transformers import AutoProcessor, AutoModelForSpeechSeq2Seq
-
-        self.processor = AutoProcessor.from_pretrained(self.model_name)
-        
-        self.model = AutoModelForSpeechSeq2Seq.from_pretrained(
-            self.model_name,
-            device_map=self.device if isinstance(self.device, str) else str(self.device),
-            # Fallback for CPU: bfloat16 is often not supported on CPU, use float32
-            torch_dtype=torch.bfloat16 if self.device != "cpu" else torch.float32
-        )
-        
-        self.tokenizer = self.processor.tokenizer
-        
-        logger.info(f"IBM Granite model loaded successfully")
-
-    def _transcribe_segment(self, audio_path: str, start_time: float, end_time: float) -> List[Dict]:
-        """Transcribe a segment using IBM Granite."""
-        import torchaudio   # type: ignore
-        
-        granite_target_sample_rate = 16000
-
         try:
-            waveform, sr = librosa.load(
-                audio_path, 
-                sr=granite_target_sample_rate, 
-                offset=start_time, 
-                duration=end_time - start_time
+            from crisperwhisper import CrisperWhisperModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "CrisperWhisper requires the 'crisperwhisper' package "
+                "(pip install 'crisperwhisper[ct2]'). Running these weights through "
+                "transformers.pipeline silently disables verbatim mode."
+            ) from exc
+
+        device_str = "cuda" if str(self.device).startswith("cuda") else "cpu"
+        logger.info(
+            f"Loading CrisperWhisper: {self.model_name} on {device_str} "
+            f"(mode={self.mode}, hotwords={len(self.hotwords)})"
+        )
+        self.model = CrisperWhisperModel(self.model_name, device=device_str)
+
+    def transcribe(self, audio_path: Union[str, Path]) -> List[Dict]:
+        """Transcribe in one pass; the package handles long-form itself.
+
+        BaseTranscriber's 300s segmentation is bypassed deliberately: fixed
+        boundaries cut mid-word, and `longform_strategy="continuation"` already
+        carries decoder context across window edges.
+        """
+        duration = self._get_audio_duration(audio_path)
+        if duration == 0:
+            logger.error("Audio file is empty!")
+            return []
+
+        logger.info(f"Transcribing (native long-form, {duration:.0f}s)...")
+        try:
+            result = self.model.transcribe(
+                str(audio_path),
+                language="en",
+                mode=self.mode,
+                hotwords=self.hotwords or None,
+                word_timestamps=True,
             )
         except Exception as e:
-            logger.error(f"Failed to load audio segment: {e}")
-            return []
+            logger.error(f"✗ CrisperWhisper failed on the whole file: {e}")
+            self.failed_ranges.append((0.0, duration))
+            self._report_failures(duration)
+            return [self._create_error_chunk(0.0, duration, e)]
 
-        if len(waveform) == 0:
-            return []
+        words = getattr(result, "words", None) or []
+        if not words:
+            # Text without per-word times is still usable, but the timeline is lost.
+            text = getattr(result, "text", "") or ""
+            logger.warning("No word timestamps returned; emitting one chunk for the file.")
+            return [{"timestamp": (0.0, duration), "text": text}] if text.strip() else []
 
-        today = datetime.now()
-        
-        system_prompt = (f"Knowledge Cutoff Date: April 2024.\nToday's Date: {today.month}/{today.day}/{today.year}.\n"
-                        f"You are Transcriber, an expert in providing accurate transcriptions of audio.")
-        user_prompt = "<|audio|>can you transcribe the speech into a written format?"
-        
-        chat = [
-            dict(role="system", content=system_prompt),
-            dict(role="user", content=user_prompt),
+        chunks = [
+            {"timestamp": (w.start, w.end), "text": w.word}
+            for w in words
+            if getattr(w, "word", "").strip()
         ]
-        
-        # Apply chat template to get the text input for the model
-        prompt_text = self.tokenizer.apply_chat_template(chat, tokenize=False, add_generation_prompt=True)
-
-        # Process audio through processor
-        # GraniteSpeechProcessor.__call__ is (text, audio, device, **kwargs) with
-        # no sampling_rate parameter -- passing one forwards it to the tokenizer,
-        # which rejects it. The waveform is already resampled to 16kHz above.
-        inputs = self.processor(
-            prompt_text,
-            waveform,
-            device=str(self.model.device),
-            return_tensors="pt"
-        ).to(self.model.device)
-
-        # Scale the token budget to the segment. A fixed 500 silently truncated
-        # every segment longer than ~90s: at the ~150-185 wpm measured on real
-        # recordings a 300s segment is ~750-925 words, well past 500 tokens.
-        segment_seconds = max(end_time - start_time, 1.0)
-        max_new_tokens = int(min(4096, max(256, segment_seconds * 6)))
-
-        # Generate transcription
-        with torch.no_grad():
-            generated_ids = self.model.generate(**inputs, max_new_tokens=max_new_tokens)
-
-        # generate() returns the prompt followed by the completion, so decoding
-        # the whole sequence pastes the chat template into the transcript
-        # ("systemKnowledge Cutoff Date... userican you transcribe... assistant").
-        # Keep only the newly generated tokens.
-        prompt_length = inputs["input_ids"].shape[1]
-        transcription = self.processor.batch_decode(
-            generated_ids[:, prompt_length:],
-            skip_special_tokens=True
-        )[0].strip()
-
-        logger.info(f"  Got text (length={len(transcription)}): {transcription[:100]}...")
-
-        # Granite doesn't provide word-level timestamps by default
-        # Return as single chunk for now
-        chunks = [{
-            "timestamp": (0.0, end_time - start_time),
-            "text": transcription
-        }]
-
-        logger.info(f"  Returning {len(chunks)} chunks")
+        marks = sum(1 for c in chunks if c["text"].strip().startswith("["))
+        logger.info(f"  Returning {len(chunks)} word chunks ({marks} disfluency markers)")
         return chunks
+
 
 class TranscriberFactory:
     """Factory to create the appropriate transcriber based on model name"""
     @staticmethod
     def create(model_name: str, device: Union[str, torch.device],
                timestamp_mode: str = "word",
-               adjust_pauses: bool = False) -> BaseTranscriber:
+               adjust_pauses: bool = False,
+               mode: str = "verbatim",
+               hotwords: Optional[List[str]] = None) -> BaseTranscriber:
         return_timestamps: Union[str, bool] = "word" if timestamp_mode == "word" else True
         if "granite-speech" in model_name.lower():
             logger.info("Creating IBM Granite transcriber")
@@ -706,10 +500,9 @@ class TranscriberFactory:
             logger.info("Creating MLX CrisperWhisper transcriber (Apple Silicon optimized)")
             return MLXCrisperWhisperTranscriber(model_name, device)
         elif "crisper" in model_name.lower():
-            logger.info(f"Creating CrisperWhisper transcriber ({timestamp_mode}-level timestamps)")
+            logger.info("Creating CrisperWhisper transcriber (native crisperwhisper package)")
             return CrisperWhisperTranscriber(model_name, device,
-                                             return_timestamps=return_timestamps,
-                                             adjust_pauses=adjust_pauses)
+                                             mode=mode, hotwords=hotwords)
         else:
             logger.info(f"Creating standard Whisper transcriber ({timestamp_mode}-level timestamps)")
             return WhisperTranscriber(model_name, device, return_timestamps=return_timestamps)
@@ -792,7 +585,9 @@ class TranscriptionOrchestrator:
         self.audio_handler = AudioHandler(self.output_dir)
         self.transcriber = TranscriberFactory.create(
             args.model, self.device, getattr(args, "timestamp_mode", "word"),
-            getattr(args, "adjust_pauses", False)
+            getattr(args, "adjust_pauses", False),
+            getattr(args, "mode", "verbatim"),
+            _load_hotwords(getattr(args, "hotwords", None)),
         )
         self.cleaner = TextCleaner(args.clean_mode, self.device)
         self.diarizer = Diarizer(args.diarizer_model, args.hf_token, self.device)
@@ -885,6 +680,21 @@ class TranscriptionOrchestrator:
                 f.write(line + "\n")
         logger.info(f"Processing complete. Results saved to: {txt_path}")
 
+def _load_hotwords(spec: Optional[str]) -> List[str]:
+    """Accept a comma-separated list or a path to a newline-delimited file."""
+    if not spec:
+        return []
+    path = Path(spec)
+    if path.is_file():
+        terms = [ln.strip() for ln in path.read_text().splitlines()]
+    else:
+        terms = [t.strip() for t in spec.split(",")]
+    terms = [t for t in terms if t]
+    if terms:
+        logger.info(f"Loaded {len(terms)} hotword term(s)")
+    return terms
+
+
 def main():
     parser = argparse.ArgumentParser(description="Cluster Speech-to-Text Pipeline")
     parser.add_argument("-i", "--input_path", type=str, required=True)
@@ -905,6 +715,14 @@ def main():
     # Off by default: pause adjustment rewrites word boundaries in place and
     # cannot be undone downstream. Transcription output stays verbatim.
     parser.add_argument("--adjust_pauses", action="store_true")
+    # CrisperWhisper only. "verbatim" keeps disfluencies ([UH]/[UM]/[laughter]);
+    # "intended" returns cleaned text.
+    parser.add_argument("--mode", type=str, choices=["verbatim", "intended"],
+                        default="verbatim")
+    # Comma-separated terms, or a path to a file with one term per line. Biases
+    # recognition toward known names/vocabulary; a superset is safe -- terms not
+    # present in the audio are not inserted.
+    parser.add_argument("--hotwords", type=str, default=None)
     parser.add_argument("--clean_mode", type=str, choices=["none", "basic", "intelligent"], default="none")
     parser.add_argument("--start_time", type=str, default=None)
     parser.add_argument("--end_time", type=str, default=None)
