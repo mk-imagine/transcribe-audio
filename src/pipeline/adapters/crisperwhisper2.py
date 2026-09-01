@@ -188,7 +188,21 @@ class CrisperWhisper2Adapter(Adapter):
             secondary=stream,
             params=params,
             backend=self._resolved_backend,
+            performance=self._performance(primary, secondary, duration),
         )
+
+    @staticmethod
+    def _performance(primary, secondary, duration: float) -> dict:
+        """What the model says it spent, and the realtime factor that implies."""
+        out: dict = {}
+        t = getattr(primary, "processing_time", None)
+        if t:
+            out["processing_time_s"] = t
+            out["realtime_factor"] = round(duration / t, 1) if t else None
+        t2 = getattr(secondary, "processing_time", None) if secondary else None
+        if t2:
+            out["secondary_processing_time_s"] = t2
+        return out
 
     # -- the three routes ---------------------------------------------------
 

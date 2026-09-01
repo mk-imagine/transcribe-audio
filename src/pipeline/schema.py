@@ -131,7 +131,8 @@ def validate(doc: Dict[str, Any]) -> List[str]:
             problems.append(f"source is missing {key!r}")
 
     asr = doc.get("asr") or {}
-    for key in ("model_id", "revision", "capabilities", "params", "granularity"):
+    for key in ("model_id", "revision", "capabilities", "params", "granularity",
+                "performance"):
         if key not in asr:
             problems.append(f"asr is missing {key!r}")
     if asr.get("granularity") not in GRANULARITIES:

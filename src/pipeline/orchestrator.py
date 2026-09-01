@@ -220,6 +220,7 @@ def transcribe(args) -> Dict[str, Any]:
         "timing_source": plan.timing_source,
         "capabilities": caps.as_dict(),
         "params": result.params,
+        "performance": result.performance,
     }
     asr.update(provenance.hf_revision(spec.model_id))
     if result.revision:
