@@ -173,6 +173,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--mode", choices=["verbatim", "intended"], default=None,
                    help="CrisperWhisper 2. 'verbatim' (its registry default) keeps "
                         "disfluencies; 'intended' returns cleaned text.")
+    # Both renderings of the same audio. On the ct2 backend the two modes share
+    # one encoder pass and one batched decode, so the second transcript is
+    # nearly free; elsewhere it falls back to two sequential passes, which
+    # produce the same thing for twice the work (D12).
+    p.add_argument("--dual_stream", "--dual-stream", action="store_true",
+                   help="Emit both the verbatim and intended streams, each with "
+                        "word timestamps. Requires a model whose mode is "
+                        "selectable.")
     p.add_argument("--hotwords", default=None,
                    help="Comma-separated terms, or a file with one per line. "
                         "Trained into the Pro checkpoints only; on a standard "
@@ -230,6 +238,14 @@ def main() -> None:
     txt_path = output_dir / f"{base}_preview.txt"
     txt_path.write_text(preview.render(doc, timestamps=not args.no_timestamps))
     logger.info("Preview written to: %s", txt_path)
+
+    if doc.get("secondary_stream"):
+        mode = doc["secondary_stream"]["mode"]
+        second = output_dir / f"{base}_{mode}_preview.txt"
+        second.write_text(
+            preview.render(doc, timestamps=not args.no_timestamps, secondary=True)
+        )
+        logger.info("Second stream (%s) written to: %s", mode, second)
 
     # A transcript with holes in it is not a successful run. The outputs are
     # still written -- the error ranges keep the timeline intact -- but the exit

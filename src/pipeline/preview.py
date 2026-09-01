@@ -39,18 +39,29 @@ def _speaker_at(t: Optional[float], turns: List[Dict[str, Any]]) -> Optional[str
     return nearest["speaker"]
 
 
-def render(doc: Dict[str, Any], *, timestamps: bool = True) -> str:
-    words = doc.get("words") or []
+def render(doc: Dict[str, Any], *, timestamps: bool = True,
+           secondary: bool = False) -> str:
+    """Render the primary stream, or the second one when ``secondary`` is set.
+
+    Both come from the same JSON, which is the point: every view of the record
+    is recomputable from it.
+    """
+    sec = doc.get("secondary_stream") or {}
+    if secondary and not sec:
+        raise ValueError("this record has no secondary stream")
+    words = (sec.get("words") if secondary else doc.get("words")) or []
     turns = sorted(doc.get("speaker_turns") or [], key=lambda t: t["start"])
     asr = doc.get("asr") or {}
     run = doc.get("run") or {}
 
     # Version-stamp the preview: a printout and a later re-render must visibly
     # differ, or a coder citing "line 47" is citing a different sentence.
+    stream_mode = sec.get("mode") if secondary else (asr.get("params") or {}).get("mode")
     head = [
-        "# stage-1 preview -- not the stage-2 render",
+        "# stage-1 preview -- not the stage-2 render"
+        + (f"  [{stream_mode} stream]" if doc.get("secondary_stream") else ""),
         f"# model:      {asr.get('model_id')} @ {asr.get('revision')}",
-        f"# mode:       {(asr.get('params') or {}).get('mode') or 'n/a'}   "
+        f"# mode:       {stream_mode or 'n/a'}   "
         f"granularity: {asr.get('granularity')}   timing: {asr.get('timing_source')}",
         f"# pipeline:   {(run.get('pipeline_version') or {}).get('commit')}"
         f"{'  (dirty)' if (run.get('pipeline_version') or {}).get('dirty') else ''}",

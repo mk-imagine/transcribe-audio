@@ -45,10 +45,23 @@ class ErrorRange:
 
 
 @dataclass
+class Stream:
+    """A second rendering of the same audio, from the same model and pass.
+
+    Named by its mode rather than by its role, so the record does not have to
+    assume which stream is primary.
+    """
+
+    mode: str
+    text: str
+    words: List[Word] = field(default_factory=list)
+
+
+@dataclass
 class AdapterResult:
     words: List[Word] = field(default_factory=list)
     text: str = ""
-    intended_text: Optional[str] = None
+    secondary: Optional[Stream] = None
     speaker_turns: List[Dict[str, Any]] = field(default_factory=list)
     errors: List[ErrorRange] = field(default_factory=list)
     # Exactly what was passed to the model, for the provenance block. Recording

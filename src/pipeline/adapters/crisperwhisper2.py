@@ -20,7 +20,7 @@ import warnings
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-from pipeline.adapters.base import Adapter, AdapterResult, ErrorRange, Word
+from pipeline.adapters.base import Adapter, AdapterResult, ErrorRange, Stream, Word
 from pipeline.capabilities import Capabilities
 
 logger = logging.getLogger(__name__)
@@ -40,14 +40,17 @@ class CrisperWhisper2Adapter(Adapter):
         hotwords="untrained",
     )
 
+    OTHER_MODE = {"verbatim": "intended", "intended": "verbatim"}
+
     def __init__(self, model_id: str, device, *, mode: str = "verbatim",
                  hotwords: Optional[List[str]] = None, backend: str = "auto",
-                 language: str = "en", **options: Any):
+                 language: str = "en", dual_stream: bool = False, **options: Any):
         super().__init__(model_id, device, **options)
         self.mode = mode
         self.hotwords = list(hotwords or [])
         self.backend = backend
         self.language = language
+        self.dual_stream = dual_stream
         self.model = None
         self._resolved_backend: Optional[str] = None
 
@@ -96,6 +99,9 @@ class CrisperWhisper2Adapter(Adapter):
     def transcribe(self, audio_path: Union[str, Path], duration: float) -> AdapterResult:
         assert self.model is not None, "load() must be called before transcribe()"
 
+        other = self.OTHER_MODE[self.mode]
+        batched = self.dual_stream and self._resolved_backend == "ct2"
+
         params = {
             "language": self.language,
             "mode": self.mode,
@@ -107,7 +113,18 @@ class CrisperWhisper2Adapter(Adapter):
             "temperature_fallback": True,
             "hallucination_mitigation": True,
         }
-        logger.info("Transcribing (native long-form, %.0fs)...", duration)
+        if self.dual_stream:
+            params["dual_stream"] = True
+            params["secondary_mode"] = other
+            # Which route ran is worth recording: batching two rows is
+            # mathematically identical per row but differs at the ULP level, so
+            # a rare near-tie token can flip between the two routes.
+            params["dual_route"] = "transcribe_dual" if batched else "two sequential passes"
+
+        logger.info(
+            "Transcribing (native long-form, %.0fs)%s...", duration,
+            f", dual stream via {params['dual_route']}" if self.dual_stream else "",
+        )
 
         # The package signals "hotwords are untrained on this checkpoint" with a
         # UserWarning. Warnings go to stderr and vanish; capture it so it reaches
@@ -115,8 +132,13 @@ class CrisperWhisper2Adapter(Adapter):
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             try:
-                result = self.model.transcribe(str(audio_path), **params)
-            except Exception as exc:  # noqa: BLE001 - recorded, then re-raised upward
+                if batched:
+                    primary, secondary = self._transcribe_batched(audio_path, other)
+                elif self.dual_stream:
+                    primary, secondary = self._transcribe_twice(audio_path, other)
+                else:
+                    primary, secondary = self._transcribe_one(audio_path, self.mode), None
+            except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
                 logger.error("CrisperWhisper failed on the whole file: %s", exc)
                 return AdapterResult(
                     errors=[ErrorRange(0.0, duration, f"{type(exc).__name__}: {exc}")],
@@ -132,8 +154,8 @@ class CrisperWhisper2Adapter(Adapter):
         if model_warnings:
             params["model_warnings"] = model_warnings
 
-        words = getattr(result, "words", None) or []
-        text = (getattr(result, "text", "") or "").strip()
+        words = self._words(primary)
+        text = (getattr(primary, "text", "") or "").strip()
 
         if not words:
             # Text with no per-word times is still content, but the timeline is
@@ -146,18 +168,88 @@ class CrisperWhisper2Adapter(Adapter):
                 ],
             )
 
-        out = [
-            Word(text=w.word.strip(), start=w.start, end=w.end)
-            for w in words
-            if getattr(w, "word", "").strip()
-        ]
-        logger.info("  %d word tokens over %.0fs", len(out), duration)
+        stream = None
+        if secondary is not None:
+            stream = Stream(
+                mode=other,
+                text=(getattr(secondary, "text", "") or "").strip(),
+                words=self._words(secondary),
+            )
+            logger.info(
+                "  %d word tokens (%s) + %d (%s) over %.0fs",
+                len(words), self.mode, len(stream.words), other, duration,
+            )
+        else:
+            logger.info("  %d word tokens over %.0fs", len(words), duration)
+
         return AdapterResult(
-            words=out,
-            text=text or " ".join(w.text for w in out),
+            words=words,
+            text=text or " ".join(w.text for w in words),
+            secondary=stream,
             params=params,
             backend=self._resolved_backend,
         )
+
+    # -- the three routes ---------------------------------------------------
+
+    def _call_params(self, mode: str) -> dict:
+        return {
+            "language": self.language,
+            "mode": mode,
+            "word_timestamps": True,
+            "hotwords": self.hotwords or None,
+            "longform_strategy": "continuation",
+            "temperature_fallback": True,
+            "hallucination_mitigation": True,
+        }
+
+    def _transcribe_one(self, audio_path, mode):
+        return self.model.transcribe(str(audio_path), **self._call_params(mode))
+
+    def _transcribe_batched(self, audio_path, other: str):
+        """One batched pass for both modes. ct2 only, and v2 only.
+
+        The modes differ only by decoder prompt prefix and share the encoder
+        output, so the expensive autoregressive decode runs once and the second
+        transcript is nearly free -- including its word-timing cross-attention,
+        captured inline in the same pass.
+        """
+        results = self.model.transcribe_dual(
+            str(audio_path),
+            language=self.language,
+            modes=(self.mode, other),
+            hotwords=self.hotwords or None,
+            word_timestamps=True,
+            # The only strategy transcribe_dual supports; passing another is a
+            # ValueError rather than a silent downgrade.
+            longform_strategy="continuation",
+            temperature_fallback=True,
+            hallucination_mitigation=True,
+        )
+        return results[0], results[1]
+
+    def _transcribe_twice(self, audio_path, other: str):
+        """Two sequential passes: the same semantics on any backend (D12).
+
+        transcribe_dual raises NotImplementedError off ct2, so the backend is
+        checked before dispatch rather than the exception being caught -- this
+        is a deliberate route, not a rescue. The package documents the two
+        routes as matching per mode, exact up to batched-GEMM rounding.
+        """
+        logger.info(
+            "Backend is %s, not ct2: running the two modes as sequential passes. "
+            "Same output, roughly twice the work.", self._resolved_backend,
+        )
+        return (self._transcribe_one(audio_path, self.mode),
+                self._transcribe_one(audio_path, other))
+
+    @staticmethod
+    def _words(result) -> List[Word]:
+        return [
+            Word(text=w.word.strip(), start=w.start, end=w.end)
+            for w in (getattr(result, "words", None) or [])
+            if getattr(w, "word", "").strip()
+        ]
 
 
 class CrisperWhisper2ProAdapter(CrisperWhisper2Adapter):

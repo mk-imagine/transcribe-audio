@@ -246,6 +246,7 @@ class _Args:
         self.mode = None
         self.hotwords_list = []
         self.timestamp_mode = "word"
+        self.dual_stream = False
         self.source_path = None
         self.start_time = None
         self.end_time = None
@@ -330,6 +331,55 @@ def _():
     assert doc["source"]["duration_s"] == 90.0
     assert doc["source"]["excerpt"]["offset_s"] == 2700.0, doc["source"]["excerpt"]
     assert doc["source"]["excerpt"]["timestamps_relative_to"] == "excerpt"
+
+
+@check("dual-stream needs a selectable mode; it is refused where there is none")
+def _():
+    from pipeline.capabilities import plan_for
+    ok = plan_for(resolve("nyralabs/CrisperWhisper2.0_large").capabilities,
+                  mode="verbatim", dual_stream=True)
+    assert ok.ok and ok.dual_stream, ok
+    for model in ("openai/whisper-large-v3", "mock/end-only", "mock/no-timestamps"):
+        bad = plan_for(resolve(model).capabilities, dual_stream=True)
+        assert not bad.ok, model
+        assert "dual-stream" in bad.errors[0]
+
+
+@check("a dual-stream run records both renderings, each with its own words")
+def _():
+    doc = _run("mock/start-end", dual_stream=True, mode="verbatim")
+    assert schema.validate(doc) == [], schema.validate(doc)
+    sec = doc["secondary_stream"]
+    assert sec["mode"] == "intended", sec["mode"]
+    assert sec["words"], "the second stream must carry its own word timestamps"
+    assert all(w["start"] is not None for w in sec["words"])
+    # The two streams differ, and differ in the way the modes are supposed to.
+    assert len(sec["words"]) < len(doc["words"])
+    assert any("filled_pause" in w["flags"] for w in doc["words"])
+    assert not any("filled_pause" in w["flags"] for w in sec["words"]), \
+        "the intended stream should carry no filled pauses"
+
+
+@check("without --dual_stream the second stream is absent, not empty")
+def _():
+    assert _run("mock/start-end")["secondary_stream"] is None
+
+
+@check("a second stream repeating the primary mode is rejected")
+def _():
+    doc = _run("mock/start-end", dual_stream=True, mode="verbatim")
+    doc["secondary_stream"]["mode"] = "verbatim"
+    assert any("duplicates the primary mode" in p for p in schema.validate(doc))
+
+
+@check("the preview can render either stream from the same record")
+def _():
+    from pipeline import preview
+    doc = _run("mock/start-end", dual_stream=True, mode="verbatim")
+    verbatim = preview.render(doc)
+    intended = preview.render(doc, secondary=True)
+    assert "[UM]" in verbatim and "[UM]" not in intended
+    assert "[intended stream]" in intended and "[verbatim stream]" in verbatim
 
 
 @check("the validator catches a malformed document")

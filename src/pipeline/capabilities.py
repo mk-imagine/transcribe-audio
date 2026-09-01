@@ -123,6 +123,7 @@ class TranscribePlan:
     forced_alignment: bool
     needs_diarizer: bool
     timing_source: str  # "native" | "derived" | "aligned"
+    dual_stream: bool = False
     warnings: Tuple[str, ...] = ()
     errors: Tuple[str, ...] = ()
 
@@ -137,6 +138,7 @@ def plan_for(
     diarize_requested: bool = True,
     mode: Optional[str] = None,
     hotwords: bool = False,
+    dual_stream: bool = False,
 ) -> TranscribePlan:
     """Turn a declaration plus the run's requests into a dispatch plan.
 
@@ -173,6 +175,17 @@ def plan_for(
             "the mode argument has no effect."
         )
 
+    # Two streams require a mode to select between: `selectable` is exactly the
+    # declaration that a mode parameter exists. Nothing further is needed --
+    # whether the adapter batches them or runs two passes is its own business
+    # (D12), and the semantics are identical either way.
+    if dual_stream and caps.verbatim != "selectable":
+        errors.append(
+            f"dual-stream output was requested, but this model declares "
+            f"verbatim={caps.verbatim!r}. Two streams need a mode to select "
+            "between them; only 'selectable' provides one."
+        )
+
     if hotwords:
         if caps.hotwords == "no":
             errors.append(
@@ -187,6 +200,7 @@ def plan_for(
             )
 
     return TranscribePlan(
+        dual_stream=dual_stream,
         chunking=caps.longform == "needs_chunking",
         derive_starts=derive_starts,
         forced_alignment=forced_alignment,

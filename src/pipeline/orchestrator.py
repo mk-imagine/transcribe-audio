@@ -127,6 +127,12 @@ def apply_plan(result: AdapterResult, plan: TranscribePlan) -> List[str]:
 
     for w in result.words:
         w.flags = flagmod.tag(w.text)
+    if result.secondary is not None:
+        # The second stream is a record in its own right, so it is tagged too --
+        # an `intended` stream should come back with no filled pauses, and a
+        # flag count that is not zero says the mode did not do what it claims.
+        for w in result.secondary.words:
+            w.flags = flagmod.tag(w.text)
 
     counts = flagmod.summarise(w.flags for w in result.words)
     if counts:
@@ -152,6 +158,7 @@ def transcribe(args) -> Dict[str, Any]:
         hotwords=getattr(args, "hotwords_list", None) or None,
         granularity=getattr(args, "timestamp_mode", None),
         backend=getattr(args, "backend", None),
+        dual_stream=getattr(args, "dual_stream", None) or None,
     )
     caps = adapter.capabilities
 
@@ -164,11 +171,13 @@ def transcribe(args) -> Dict[str, Any]:
         diarize_requested=not args.no_diarize,
         mode=effective.get("mode"),
         hotwords=bool(getattr(args, "hotwords_list", None)),
+        dual_stream=bool(getattr(args, "dual_stream", False)),
     )
     logger.info(
-        "Plan: chunking=%s derive_starts=%s forced_alignment=%s diarizer=%s timing=%s",
+        "Plan: chunking=%s derive_starts=%s forced_alignment=%s diarizer=%s "
+        "timing=%s dual_stream=%s",
         plan.chunking, plan.derive_starts, plan.forced_alignment,
-        plan.needs_diarizer, plan.timing_source,
+        plan.needs_diarizer, plan.timing_source, plan.dual_stream,
     )
     for w in plan.warnings:
         logger.warning(w)
@@ -226,10 +235,20 @@ def transcribe(args) -> Dict[str, Any]:
         errors=[e.as_dict() for e in result.errors],
         warnings=list(plan.warnings) + notes + _model_warnings(result),
         text=result.text,
-        intended_text=result.intended_text,
+        secondary_stream=_secondary_block(result, plan),
     )
     logger.info("Stage 1 complete: %s", schema.summary(doc))
     return doc
+
+
+def _secondary_block(result: AdapterResult, plan: TranscribePlan) -> Optional[Dict[str, Any]]:
+    if result.secondary is None:
+        return None
+    return {
+        "mode": result.secondary.mode,
+        "text": result.secondary.text,
+        "words": schema.words_block(result.secondary.words, plan.timing_source),
+    }
 
 
 def _source_block(args, processed: Path, duration: float) -> Dict[str, Any]:

@@ -15,6 +15,10 @@ What replaced what:
   "derived from the previous token's end" are never confused;
 * ``errors`` keep unrecoverable ranges in the timeline instead of dropping
   them, because a hole that is not in the file is a hole nobody finds;
+* ``secondary_stream`` carries the second rendering when ``--dual_stream`` is
+  used -- same audio, same model, the other mode -- with its own word
+  timestamps. It is keyed by ``mode`` rather than by role, so the record never
+  has to assume which stream is primary;
 * ``warnings`` keep every caveat the run raised -- an untrained hotword prompt,
   a start time derived without silence tokens -- in the file rather than only
   in a job log that gets rotated away.
@@ -44,7 +48,7 @@ def build(
     words: Iterable[Any],
     diarization: Optional[Dict[str, Any]] = None,
     speaker_turns: Optional[List[Dict[str, Any]]] = None,
-    intended_text: Optional[str] = None,
+    secondary_stream: Optional[Dict[str, Any]] = None,
     errors: Optional[List[Dict[str, Any]]] = None,
     warnings: Optional[List[str]] = None,
     text: str = "",
@@ -56,27 +60,31 @@ def build(
         "run": run,
         "asr": asr,
         "diarization": diarization,
-        "words": [
-            {
-                "i": i,
-                "text": w.text,
-                "start": _round(w.start),
-                "end": _round(w.end),
-                "timing_source": getattr(w, "timing_source", asr.get("timing_source")),
-                "speaker": w.speaker,
-                "speaker_source": "asr" if w.speaker is not None else None,
-                "conf": w.conf,
-                "flags": list(w.flags),
-            }
-            for i, w in enumerate(words)
-        ],
+        "words": words_block(words, asr.get("timing_source")),
         "text": text,
         "speaker_turns": speaker_turns or [],
-        "intended_text": intended_text,
+        "secondary_stream": secondary_stream,
         "errors": errors or [],
         "warnings": list(warnings or []),
     }
     return doc
+
+
+def words_block(words: Iterable[Any], timing_source: Optional[str]) -> List[Dict[str, Any]]:
+    return [
+        {
+            "i": i,
+            "text": w.text,
+            "start": _round(w.start),
+            "end": _round(w.end),
+            "timing_source": getattr(w, "timing_source", timing_source),
+            "speaker": w.speaker,
+            "speaker_source": "asr" if w.speaker is not None else None,
+            "conf": w.conf,
+            "flags": list(w.flags),
+        }
+        for i, w in enumerate(words)
+    ]
 
 
 def _round(v: Optional[float]) -> Optional[float]:
@@ -169,6 +177,20 @@ def validate(doc: Dict[str, Any]) -> List[str]:
         for key in ("start", "end", "message"):
             if key not in e:
                 problems.append(f"errors[{n}] is missing {key!r}")
+
+    sec = doc.get("secondary_stream")
+    if sec is not None:
+        for key in ("mode", "text", "words"):
+            if key not in sec:
+                problems.append(f"secondary_stream is missing {key!r}")
+        if sec.get("mode") == (asr.get("params") or {}).get("mode"):
+            problems.append(
+                "secondary_stream.mode duplicates the primary mode; the second "
+                "stream must be a different rendering, not the same one twice"
+            )
+        for n, w in enumerate(sec.get("words") or []):
+            if w.get("i") != n:
+                problems.append(f"secondary_stream.words[{n}].i is {w.get('i')!r}")
     return problems
 
 
@@ -180,8 +202,10 @@ def summary(doc: Dict[str, Any]) -> str:
         for f in w.get("flags") or []:
             flags[f] = flags.get(f, 0) + 1
     lost = sum(e["end"] - e["start"] for e in (doc.get("errors") or []))
+    sec = doc.get("secondary_stream")
+    extra = (f", +{len(sec.get('words') or [])} {sec['mode']} tokens" if sec else "")
     return (
-        f"{len(words)} tokens, flags={flags or '{}'}, "
+        f"{len(words)} tokens{extra}, flags={flags or '{}'}, "
         f"{len(doc.get('speaker_turns') or [])} speaker turns, "
         f"{len(doc.get('errors') or [])} error range(s) ({lost:.0f}s lost), "
         f"{len(doc.get('warnings') or [])} warning(s)"

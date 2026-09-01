@@ -17,7 +17,7 @@ import logging
 from pathlib import Path
 from typing import Any, List, Union
 
-from pipeline.adapters.base import Adapter, AdapterResult, ErrorRange, Word
+from pipeline.adapters.base import Adapter, AdapterResult, ErrorRange, Stream, Word
 from pipeline.capabilities import Capabilities
 
 logger = logging.getLogger(__name__)
@@ -60,8 +60,11 @@ class _MockBase(Adapter):
     with_silences = False
     fail_ranges: tuple = ()
 
-    def __init__(self, model_id: str, device, **options: Any):
+    def __init__(self, model_id: str, device, *, mode: str = "verbatim",
+                 dual_stream: bool = False, **options: Any):
         super().__init__(model_id, device, **options)
+        self.mode = mode
+        self.dual_stream = dual_stream
         self.loaded = False
 
     def load(self) -> None:
@@ -79,12 +82,24 @@ class _MockBase(Adapter):
         if errors:
             lo, hi = errors[0].start, errors[-1].end
             words = [w for w in words if not (w.start is not None and lo <= w.start < hi)]
+        secondary = None
+        if self.dual_stream:
+            # The clean rendering: same timeline, markers dropped -- which is
+            # what distinguishes the two streams and what stage 2's two profiles
+            # actually differ over.
+            clean = [w for w in words if not w.text.startswith("[")]
+            secondary = Stream(
+                mode="intended" if self.mode == "verbatim" else "verbatim",
+                text=" ".join(w.text for w in clean),
+                words=clean,
+            )
         return AdapterResult(
             words=words,
             text=" ".join(w.text for w in words),
+            secondary=secondary,
             speaker_turns=self._turns(duration),
             errors=errors,
-            params={"mock": True, "model_id": self.model_id},
+            params={"mock": True, "model_id": self.model_id, "mode": self.mode},
             revision="mock-0",
             backend="mock",
         )
