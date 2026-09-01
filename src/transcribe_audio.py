@@ -714,7 +714,10 @@ def main():
     # ibm-granite/granite-speech-3.3-2b
     # openai/whisper-small
     # unsloth/crisperwhisper
-    parser.add_argument("--model", type=str, default="unsloth/crisperwhisper")
+    # CrisperWhisper 2. The v1 redistributions (unsloth/crisperwhisper,
+    # kyr0/crisperwhisper-unsloth-mlx) silently ignore --mode and --hotwords and
+    # emit no disfluency markers; the package warns but the run still succeeds.
+    parser.add_argument("--model", type=str, default="nyralabs/CrisperWhisper2.0_large")
     parser.add_argument("--diarizer_model", type=str, default="pyannote/speaker-diarization-community-1")
     parser.add_argument("--hf_token", type=str, default=None)
     parser.add_argument("--no_diarize", action="store_true")
