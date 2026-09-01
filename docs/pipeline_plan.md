@@ -68,6 +68,7 @@ Settled. Each entry records what would reopen it.
 | D2 | **Capability contract, not a model-name factory** | Plug-and-play comes from adapters declaring what they provide, with the orchestrator filling gaps. | — |
 | D3 | **Stage 1 is verbatim and lossless.** No cleaning, filtering, or speaker assignment. | Cleaning in stage 1 destroys information before it is ever written to disk. | — |
 | D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
+| D19 | **Read the model's own docs before writing an integration; never assume a generic loader is correct.** | A generic loader that runs is not evidence it runs correctly — the failure is silent and produces self-consistent wrong measurements. See the callout at the head of §3 for three worked instances. | — |
 | D18 | **Proper-noun detection by three-dissenter conjunction (§7b), compared on a fluent view.** | Glossaries cannot be built ahead of an arbitrary lecture, but cross-model disagreement localises garbles without one. Dissenters must come from independent lineages. | A single model gains reliable proper-noun accuracy |
 | D4 | **Default model: `nyralabs/CrisperWhisper2.0_large`** | Verbatim is its explicit training objective, not an accident of its corpus. Only candidate with a documented verbatim/intended switch. | Phase 0 shows poor disfluency retention on real audio |
 | D5 | **Second adapter: `ibm-granite/granite-speech-4.1-2b-plus`** | Apache 2.0, and exercises three capability paths CW2 does not (`end_only` timestamps, silence tokens, native speaker labels) — which is what proves the contract is real. | — |
@@ -86,6 +87,29 @@ Settled. Each entry records what would reopen it.
 ---
 
 ## 3. Verified model facts
+
+> ### Read the model's own documentation before writing any integration
+>
+> **Always check a model's card, README and package API before assuming a generic
+> loader will work.** This applies to every open model — HuggingFace or elsewhere —
+> and to every generic interface: `transformers.pipeline`, `AutoModelFor*`, or any
+> other convenience wrapper.
+>
+> A generic loader that *runs* is not evidence that it runs *correctly*. The failure
+> is quiet: the model produces plausible output, every measurement you take is
+> internally consistent, and the conclusions are wrong. Three instances in one week:
+>
+> | model | generic assumption | what the docs said | cost |
+> |---|---|---|---|
+> | CrisperWhisper 2 | `transformers.pipeline` | package exposes `mode="verbatim"`, absent from the pipeline | benchmarked as emitting **zero** disfluencies; drove a ten-model search and a fine-tuning plan that were unnecessary |
+> | ARK-ASR-0.6B | cast every float tensor to fp16, feed 90 s | cast **only** `inputs["audios"]`; `audio_max_length=30*16000`; `do_sample=False`; `bad_words_ids` | output collapsed into repeated CJK characters; nearly discarded a working model |
+> | CTC models (Parakeet, Granite TurboCTC) | reuse the seq2seq `chunk_length_s` | CTC is frame-synchronous and needs no chunking | silently returned ~12% of the content (63 words where the reference was 545) |
+>
+> The tell in all three: output that is *plausible but wrong in a way no error message
+> reports*. Before trusting a benchmark number, confirm the invocation matches the
+> documented one — including defaults, dtype handling, input length limits and
+> generation flags. Where a model ships its own package, prefer it over the generic
+> wrapper and record which was used (§5 provenance).
 
 **Verified 2026-08-27 by fetching the model cards directly.** These postdate common knowledge
 cutoffs — do not "correct" them from memory. Re-verify if acting on them much later.
