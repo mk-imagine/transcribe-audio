@@ -7,9 +7,26 @@ Re-verify versions before relying on them.
 
 ## POLARIS (SFSU HPC) — primary compute
 
-Login node `n1.hpc.at.sfsu.edu`, Rocky Linux 8.10, glibc 2.28, miniforge3, conda 25.3.1.
-Home is shared NFS (`/Users/<id>`), **`/tmp` is node-local** — files written there by a batch
-job are not visible from the login node.
+Login node `n1.hpc.at.sfsu.edu`, Rocky Linux 8.10, glibc 2.28, miniforge3 with
+**mamba 2.0.8**. Home is shared NFS (`/Users/<id>`), **`/tmp` is node-local** — files written
+there by a batch job are not visible from the login node.
+
+> ### Use `mamba`, not `conda`, for all environment management
+>
+> Create, install, remove, activate and run through mamba. It resolves far faster
+> and is what `src/transcribe.slurm` already activates with.
+>
+> ```bash
+> source $HOME/miniforge3/etc/profile.d/mamba.sh   # for `mamba activate`
+> mamba create -n <env> python=3.11 -y
+> mamba install -n <env> -c conda-forge <pkg>
+> mamba run -n <env> python script.py
+> mamba env remove -n <env> -y
+> ```
+>
+> In non-interactive `ssh -n` commands the shell function may not be initialised;
+> call the binary directly at `$HOME/miniforge3/bin/mamba`, or source
+> `mamba.sh` first. `pip` still runs inside an activated env as usual.
 
 ### Access
 
@@ -69,7 +86,8 @@ Use `${PIPESTATUS[0]}`.
 | `audio-transcribe-crisper` | 2.8.0 | 4.37.2 | nyrahealth transformers fork for CrisperWhisper **v1**. Obsolete under D17; delete once nothing references it. |
 | `diarizen` | 2.1.1+cu121 | — | DiariZen + vendored pyannote 3.1.1 fork. **Benchmarked and rejected** — keep only if revisiting diarization. |
 
-**Never build an env with `conda create --clone` when pip will run in it.** Clones hardlink
+**Never build an env with `mamba create --clone` (or `conda create --clone`) when pip will
+run in it.** Clones hardlink
 package files, so a pip upgrade in the clone can strip packages from the *source* env.
 Installing transformers 5.x into a clone removed `regex` and `safetensors` from both parents
 and broke two working environments. Build from scratch.
@@ -78,7 +96,7 @@ and broke two working environments. Build from scratch.
 Rocky 8's system `libstdc++` lacks:
 
 ```bash
-LD_LIBRARY_PATH=$HOME/miniforge3/envs/diarizen/lib conda run -n diarizen python ...
+LD_LIBRARY_PATH=$HOME/miniforge3/envs/diarizen/lib mamba run -n diarizen python ...
 ```
 
 ### Data
