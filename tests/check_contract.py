@@ -243,7 +243,7 @@ class _Args:
         self.no_diarize = True
         self.diarizer_model = "pyannote/speaker-diarization-community-1"
         self.hf_token = None
-        self.mode = "verbatim"
+        self.mode = None
         self.hotwords_list = []
         self.timestamp_mode = "word"
         self.source_path = None
@@ -257,6 +257,14 @@ def _run(model, **kw):
         audio = Path(td) / "s.wav"
         _silence(audio)
         return transcribe(_Args(model=model, input_path=str(audio), **kw))
+
+
+@check("a model with no modes runs without --mode; the registry supplies the default")
+def _():
+    # mock/end-only declares verbatim='no'. Left to argparse's old default this
+    # refused itself over a mode nobody requested.
+    doc = _run("mock/end-only")
+    assert doc["asr"]["capabilities"]["verbatim"] == "no"
 
 
 @check("a full mock run produces a valid schema-v1 document")
@@ -279,7 +287,7 @@ def _():
 def _():
     doc = _run("mock/start-end")
     assert all(w["speaker"] is None and w["speaker_source"] is None for w in doc["words"])
-    doc = _run("mock/speaker-labels", no_diarize=False, mode=None)
+    doc = _run("mock/speaker-labels", no_diarize=False)
     assert all(w["speaker_source"] == "asr" for w in doc["words"])
     assert doc["diarization"] is None, "a speaker_labels model must not load a diarizer"
 
@@ -297,14 +305,14 @@ def _():
 
 @check("the unimplemented aligner is recorded as a warning, not silently skipped")
 def _():
-    doc = _run("mock/no-timestamps", mode=None)
+    doc = _run("mock/no-timestamps")
     assert any("forced" in w for w in doc["warnings"]), doc["warnings"]
     assert all(w["timing_source"] == "aligned" for w in doc["words"])
 
 
 @check("derived timing is labelled 'derived' in every word of the record")
 def _():
-    doc = _run("mock/end-only", no_diarize=False, mode=None)
+    doc = _run("mock/end-only", no_diarize=False)
     assert all(w["timing_source"] == "derived" for w in doc["words"])
     assert all(w["start"] is not None for w in doc["words"])
 

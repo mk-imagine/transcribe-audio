@@ -167,8 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Generic Whisper only. 'chunk' is a VRAM concession for "
                         "8GB cards, where word-level alignments OOM; it coarsens "
                         "the record and is written to asr.granularity.")
-    p.add_argument("--mode", choices=["verbatim", "intended"], default="verbatim",
-                   help="CrisperWhisper 2. 'verbatim' keeps disfluencies.")
+    # No argparse default: the registry supplies the per-checkpoint default
+    # (verbatim for CrisperWhisper 2), so a model without modes is not refused
+    # over one the user never asked for.
+    p.add_argument("--mode", choices=["verbatim", "intended"], default=None,
+                   help="CrisperWhisper 2. 'verbatim' (its registry default) keeps "
+                        "disfluencies; 'intended' returns cleaned text.")
     p.add_argument("--hotwords", default=None,
                    help="Comma-separated terms, or a file with one per line. "
                         "Trained into the Pro checkpoints only; on a standard "

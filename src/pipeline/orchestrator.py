@@ -80,7 +80,7 @@ def build_adapter(
 
     merged = dict(spec.defaults)
     merged.update({k: v for k, v in options.items() if v is not None})
-    return cls(model_id, device, **_filtered(cls, merged)), spec, source
+    return cls(model_id, device, **_filtered(cls, merged)), spec, source, merged
 
 
 def _accepted(cls) -> set:
@@ -145,7 +145,7 @@ def transcribe(args) -> Dict[str, Any]:
     audio_path = Path(args.input_path)
     device = select_device(getattr(args, "device", None))
 
-    adapter, spec, adapter_source = build_adapter(
+    adapter, spec, adapter_source, effective = build_adapter(
         args.model, device,
         adapter_override=getattr(args, "adapter", None),
         mode=getattr(args, "mode", None),
@@ -155,10 +155,14 @@ def transcribe(args) -> Dict[str, Any]:
     )
     caps = adapter.capabilities
 
+    # The mode checked against the declaration is the *effective* one: the
+    # registry's default for this checkpoint, overridden by the CLI. Defaulting
+    # --mode to "verbatim" in argparse made every generic-Whisper run refuse
+    # itself over a mode the user never asked for.
     plan = plan_for(
         caps,
         diarize_requested=not args.no_diarize,
-        mode=getattr(args, "mode", None),
+        mode=effective.get("mode"),
         hotwords=bool(getattr(args, "hotwords_list", None)),
     )
     logger.info(
