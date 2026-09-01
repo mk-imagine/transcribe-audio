@@ -1,12 +1,27 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --output=./logs/transcribe_%j.log
+# Relative to the submit directory, so a direct `sbatch src/transcribe.slurm`
+# must be run from the repo root. run_transcription.sh overrides this with an
+# absolute path derived from its own location, so it works from anywhere.
+#SBATCH --output=hpc/logs/transcribe_%j.log
 
 set -e
 
 echo "Running on node: $SLURMD_NODENAME"
 echo "Partition: $SLURM_JOB_PARTITION"
+
+# The pipeline is invoked as a bare filename below, so the job has to run from
+# src/. SLURM starts a job in the submit directory, which is not necessarily
+# that. REPO_ROOT is exported by run_transcription.sh; a direct sbatch falls
+# back to the submit directory, which must then be the repo root.
+REPO_ROOT="${REPO_ROOT:-$SLURM_SUBMIT_DIR}"
+if [ ! -f "${REPO_ROOT}/src/transcribe_audio.py" ]; then
+    echo "ERROR: no src/transcribe_audio.py under REPO_ROOT=${REPO_ROOT}."
+    echo "       Submit from the repo root, or use src/run_transcription.sh."
+    exit 2
+fi
+cd "${REPO_ROOT}/src"
 
 # --- Environment Setup ---
 # Adjust this path if your mamba/conda location is different on the cluster
