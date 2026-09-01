@@ -107,6 +107,10 @@ python -u transcribe_audio.py -i ../data/geisler.wav -o ../transcripts/out \
     --start_time 00:45:00 --end_time 00:46:30 --no_diarize --mode verbatim
 ```
 
+Add `--dual_stream` for both renderings — verbatim *and* intended, each with word timestamps,
+from one batched pass on the ct2 backend (~11% more inference than one stream, against ~100%
+for a second pass). It writes a second preview file per stream.
+
 Outputs `<name>_raw.json` (schema v1, the record) and `<name>_preview.txt` (a stage-1
 preview, not the stage-2 render). Exit codes: **1** means audio ranges were lost and the
 transcript has holes; **2** means the model id or the requested mode was refused.
@@ -162,6 +166,7 @@ Throughput measured on 300 s of audio, A100, correctly configured:
 | `parakeet-ctc-0.6b` | 1508 | |
 | `parakeet-tdt-0.6b-v3` | 182 | |
 | **CrisperWhisper 2 (package)** | **38** | vs 12 through `transformers.pipeline` |
+| CrisperWhisper 2, `--dual_stream` | 33 | both streams in one batched pass; ~11% over a single stream |
 | `Qwen3-ASR-1.7B` | 23 | |
 | `ARK-ASR-0.6B` | 36 | 30 s audio cap → 10 calls per 300 s |
 

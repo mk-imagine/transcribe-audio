@@ -81,7 +81,7 @@ Settled. Each entry records what would reopen it.
 | D9 | **Turn is the primary render unit**, subdivided within long turns | Confirmed by the user: interview coding is turn-level, with timestamps inside long turns for citation. | — |
 | D10 | **Both profiles carry timestamps** | Lecture profile needs them to check the audio when a transcript looks wrong. | — |
 | D11 | **HTML + print CSS is the default print format**; plain text always emitted; LaTeX optional; docx deferred | HTML has zero new dependencies and the fastest layout-iteration loop. | QDA tool adoption makes docx urgent |
-| D12 | **Dual-stream output is an adapter-internal optimisation, not an architecture** | `transcribe_dual()` is ct2-only; falling back to two sequential `transcribe()` calls keeps the *semantics* testable on any backend. | — |
+| D12 | **Dual-stream output is an adapter-internal optimisation, not an architecture** | `transcribe_dual()` is ct2-only; falling back to two sequential `transcribe()` calls keeps the *semantics* testable on any backend. **Implemented and verified 2026-09-01** — both routes produce byte-identical text (§3). | — |
 | D13 | **MPS and MLX are dropped.** Develop on CPU containers locally, CUDA on the cluster. | Docker on macOS cannot expose Metal to Linux containers, so MPS needs a bare-metal install — a policy exception for a platform that is never a deployment target. The repo already pays this tax (chunk-level timestamp workaround, whole MLX path). | — |
 | D14 | **The RTX 3070 VM is general ML infrastructure, not a blocker for this project** | Phase 0 is fully answerable in a CPU container. The VM's real value is serving every ML repo and resolving the host-install friction permanently. | — |
 | D15 | **Non-commercial weights accepted** | Non-commercial academic research; not researching model methods, just using them. | Work becomes commercial or ships tooling with weights |
@@ -216,6 +216,44 @@ one pass. See D22 and §7b.
 
 One 90 s window, so the direction is measured but not established. What is established is that
 the previous entry recorded the benefit without checking the cost.
+
+#### Dual-stream costs ~11%, not 100% (measured 2026-09-01)
+
+`transcribe_dual()` decodes both modes in one batched pass: they differ only by the decoder
+prompt prefix and share the encoder output, so the autoregressive decode runs once for both
+and each mode's word-timing cross-attention is captured inline. It is **ct2-only and v2-only**
+— it raises `NotImplementedError` otherwise — and only `longform_strategy="continuation"` is
+supported for it.
+
+Measured on `geisler.wav` 45:00–46:30, A100, warm cache, two trials each. `processing_time`
+is the package's own inference timer, not wall clock:
+
+| run | inference | RTFx |
+|---|---|---|
+| single verbatim | 2.451 s / 2.390 s | 36.7 / 37.7 |
+| dual (both streams) | 2.791 s / 2.595 s | 32.2 / 34.7 |
+
+The second transcript costs **~11%** more inference time (2.42 s → 2.69 s mean), against ~100%
+for a second sequential pass — so roughly **1.8× faster than two passes**, matching the ~1.9×
+the package documents. Both streams report the same `processing_time`, which is what one
+shared pass should look like.
+
+**Equivalence holds.** The dual run's verbatim stream is byte-identical to a separate
+`--mode verbatim` run (166 tokens), and its intended stream byte-identical to a separate
+`--mode intended` run (154 tokens). Timestamps differ on **2 of 332 bounds, by at most
+0.120 s** — the package documents exactly this: batching two rows is mathematically identical
+per row but differs at the ULP level, which can flip a rare near-tie token or timing on
+long-form audio. Which route ran is recorded in `asr.params.dual_route`.
+
+Flag counts confirm the modes did what they claim: 10 filled pauses in the verbatim stream,
+**zero** in the intended one. Tagging the second stream is a check, not decoration — a
+non-zero count there would mean `intended` had not cleaned anything.
+
+> **Do not use wall clock to size a SLURM request.** The first attempt at this comparison
+> read 19.1 s against 9.7 s and looked like dual costing 2×. Both figures were dominated by
+> model load and a sha256 over the source audio, and the dual run happened to go first and pay
+> a cold cache. The decode phases were ~3 s and ~2 s. `asr.performance` now records the
+> model's own timer for this reason.
 
 > **Do not benchmark CrisperWhisper through `transformers.pipeline`.** It has no `mode`
 > parameter, so verbatim output cannot be requested and the model looks like an ordinary
@@ -427,7 +465,8 @@ word index monotonicity, timing ordering and the speaker/speaker_source coupling
                "revision_source": "local cache",
                "adapter": "CrisperWhisper2Adapter", "adapter_source": "registry",
                "backend": "ct2", "granularity": "word", "timing_source": "native",
-               "capabilities": { ... }, "params": { "mode": "verbatim", ... } },
+               "capabilities": { ... }, "params": { "mode": "verbatim", ... },
+               "performance": { "processing_time_s": 2.79, "realtime_factor": 32.2 } },
   "diarization": { "model_id": "...", "revision": "...", "params": { ... } },
 
   "words": [
@@ -439,7 +478,8 @@ word index monotonicity, timing ordering and the speaker/speaker_source coupling
 
   "text":          "...",          // the model's own full text
   "speaker_turns": [ { "start": 0.0, "end": 41.2, "speaker": "SPEAKER_00" } ],
-  "intended_text": "...",          // second stream when dual-stream requested
+  "secondary_stream": {            // present only with --dual_stream
+      "mode": "intended", "text": "...", "words": [ ... ] },
   "errors":        [ { "start": 900.0, "end": 1200.0, "message": "..." } ],
   "warnings":      [ "hotwords were supplied to a checkpoint that was never ..." ]
 }
@@ -457,6 +497,12 @@ Three fields beyond the original sketch, each earned by something that went wron
   cannot be left to infer which it is reading.
 - **`warnings`** — the caveats were going to stderr and vanishing with the job log. The
   untrained-hotword `UserWarning` (D21) is captured from the package and written here.
+- **`secondary_stream`** replaces the sketch's text-only `intended_text`. It carries word
+  timestamps, which D10 requires — both render profiles carry timestamps, and the lecture
+  profile renders the *intended* stream — and it is keyed by `mode` rather than by role, so
+  the record never has to assume which stream is primary.
+- **`performance`** — the model's own inference timer and the realtime factor it implies.
+  Phase 0 question 3 asks for exactly this, and wall clock cannot answer it (§3).
 
 - **`speaker` is absent from words by default.** Diarization turns are stored raw and assigned
   in stage 2, keeping assignment rules tunable. When the ASR supplies its own labels
