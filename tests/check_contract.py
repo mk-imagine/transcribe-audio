@@ -366,6 +366,17 @@ def _():
     assert "[UM]" in text, "verbatim markers must survive into the preview"
 
 
+@check("a word in a gap between diarizer turns still gets a speaker in the preview")
+def _():
+    from pipeline.preview import _speaker_at
+    turns = [{"start": 0.0, "end": 4.0, "speaker": "SPEAKER_00"},
+             {"start": 5.0, "end": 9.0, "speaker": "SPEAKER_01"}]
+    assert _speaker_at(2.0, turns) == "SPEAKER_00"
+    assert _speaker_at(4.2, turns) == "SPEAKER_00"   # in the gap, nearer the first
+    assert _speaker_at(4.9, turns) == "SPEAKER_01"   # in the gap, nearer the second
+    assert _speaker_at(0.0, []) is None
+
+
 def main():
     for name in PASSED:
         print(f"  ok    {name}")

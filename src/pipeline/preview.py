@@ -23,13 +23,20 @@ def _fmt(seconds: Optional[float]) -> str:
 
 
 def _speaker_at(t: Optional[float], turns: List[Dict[str, Any]]) -> Optional[str]:
-    """Nearest-overlap lookup. Stage 2 does this properly, with smoothing."""
+    """Containing turn, else the nearest one.
+
+    Diarizer turns do not tile the timeline -- they leave gaps at pauses -- so a
+    containment-only lookup returns None for any word in a gap and breaks the
+    line there. Stage 2 does this properly, with smoothing inside pause-bounded
+    runs; falling back to the nearest turn is enough to keep a preview readable.
+    """
     if t is None or not turns:
         return None
     for turn in turns:
         if turn["start"] <= t < turn["end"]:
             return turn["speaker"]
-    return None
+    nearest = min(turns, key=lambda x: min(abs(t - x["start"]), abs(t - x["end"])))
+    return nearest["speaker"]
 
 
 def render(doc: Dict[str, Any], *, timestamps: bool = True) -> str:
@@ -43,7 +50,7 @@ def render(doc: Dict[str, Any], *, timestamps: bool = True) -> str:
     head = [
         "# stage-1 preview -- not the stage-2 render",
         f"# model:      {asr.get('model_id')} @ {asr.get('revision')}",
-        f"# mode:       {(asr.get('params') or {}).get('mode')}   "
+        f"# mode:       {(asr.get('params') or {}).get('mode') or 'n/a'}   "
         f"granularity: {asr.get('granularity')}   timing: {asr.get('timing_source')}",
         f"# pipeline:   {(run.get('pipeline_version') or {}).get('commit')}"
         f"{'  (dirty)' if (run.get('pipeline_version') or {}).get('dirty') else ''}",
