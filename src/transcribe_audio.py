@@ -177,9 +177,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Comma-separated terms, or a file with one per line. "
                         "Trained into the Pro checkpoints only; on a standard "
                         "checkpoint the run warns and records the warning.")
+    # Retained because transcribe.slurm always passes it, and removing it would
+    # break the wrapper's argument contract. It no longer does anything: stage 1
+    # is lossless (D3), and disfluencies are data to be tagged in annotate.py,
+    # not deleted before they are ever written to disk (bug 4).
     p.add_argument("--clean_mode", choices=["none", "basic", "intelligent"], default="none",
-                   help="Preview text only. The JSON is always verbatim (D3); "
-                        "tagging disfluencies is annotate.py's job, not this one's.")
+                   help="Accepted and ignored. Stage 1 is always verbatim; "
+                        "cleaning moves to annotate.py as a tagger.")
     p.add_argument("--start_time", default=None)
     p.add_argument("--end_time", default=None)
     p.add_argument("--job_id", default=None)
@@ -195,9 +199,11 @@ def main() -> None:
 
     if args.clean_mode != "none":
         logger.warning(
-            "--clean_mode %s affects the preview text only. Stage 1's JSON is "
-            "always verbatim: cleaning here would destroy information before it "
-            "was ever written to disk (D3, bug 4).", args.clean_mode,
+            "--clean_mode %s is accepted and ignored. Stage 1 is verbatim and "
+            "lossless: cleaning here destroyed information before it was ever "
+            "written to disk, and chunks that cleaned to empty were dropped, "
+            "punching holes in the timeline (D3, bugs 4 and 5). Disfluencies "
+            "are tagged in annotate.py, never deleted.", args.clean_mode,
         )
 
     output_dir = Path(args.output_dir)
