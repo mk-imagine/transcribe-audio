@@ -92,3 +92,10 @@ transcripts/
 # Python bytecode from running the pipeline in-tree
 __pycache__/
 *.py[cod]
+
+# HPC scratch: job scripts and SLURM logs from cluster runs. Kept in-repo so
+# they sit beside the work they describe, never committed -- they are noisy,
+# machine-specific, and reference human-subjects audio paths. The README
+# documents the convention so it survives a fresh clone.
+/hpc/*
+!/hpc/README.md
