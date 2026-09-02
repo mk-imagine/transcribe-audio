@@ -135,7 +135,7 @@ GPU and no packages, so it runs on the Mac and on the login node alike.
 | file | duration | notes |
 |---|---|---|
 | `geisler.wav` | 91.7 min | Lecture, **disfluency-rich** — the reference for verbatim testing. 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
-| `251211_0009.wav` | 80.7 min | Multi-speaker interview — the real use case. |
+| `251211_0009.wav` | 80.7 min | **Proseminar guest lecture** — a visiting professor presenting their research, with host interaction. Multi-speaker, and the source of `tests/fixtures/golden.json`. *Not* a research-participant interview: there is no interview recording in `data/` yet. |
 | `tate_1.m4a` | 79.0 min | Lecture, low-disfluency speaker. Only `.m4a` source; exercises the decode-path penalty (bug 9). |
 
 `.env` holds `HF_TOKEN` (mode 600), gitignored, required for pyannote.

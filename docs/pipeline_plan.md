@@ -568,7 +568,7 @@ detector — repurposed from **deleter to tagger**.
 
 Two ~80 min recordings, CrisperWhisper word-level timestamps on an A100, `--clean_mode none`:
 
-| Signal | Interview (14,709 w, 182 wpm) | Lecture (11,588 w, 147 wpm) |
+| Signal | Proseminar, guest + host (14,709 w, 182 wpm) | Lecture (11,588 w, 147 wpm) |
 |---|---|---|
 | terminal punctuation | every 4.7 s | every 7.0 s |
 | pause > 0.2 s | every 2.8 s | every 2.8 s |
@@ -644,8 +644,9 @@ Most of this pipeline needs no GPU — and no model — at all.
 
 - **Stage 2 is entirely model-free.** Turn grouping, anchors, speaker assignment and smoothing,
   line numbering, print CSS, both profiles, every format backend: a pure function over JSON.
-  Generate one real raw JSON, **commit it as `tests/fixtures/golden.json`**, and renderer
-  development and tests run in milliseconds forever on any machine.
+  **Done 2026-09-01: `tests/fixtures/golden.json`** — 10 min of `251211_0009.wav`, dual-stream,
+  diarized, 1,969 + 1,864 tokens, 59 turns over 3 labels, 61 disfluency flags. See its README
+  for provenance. Renderer development and tests now run in milliseconds on any machine.
 - **Register a `mock` adapter.** It declares `Capabilities` like any other model and returns
   canned words, testing orchestrator dispatch deterministically in CI — including the paths
   hardest to trigger with real models: `end_only` derivation, forced-alignment gap-fill,
@@ -722,6 +723,13 @@ mean it cannot size an A100 request.
 Slice 60–90 s clips (the existing `--start_time` / `--end_time` ffmpeg path does this) and keep
 them as standard fixture inputs. **One interview excerpt and one lecture excerpt** — spontaneous
 dialogue and monologue stress disfluency handling very differently.
+
+> **There is no interview recording in `data/` yet.** `251211_0009.wav` was labelled one here
+> and in `docs/environments.md` until 2026-09-01; it is a proseminar guest lecture with host
+> interaction. The coding profile — the project's primary use case — is therefore being
+> developed against lecture-with-dialogue audio. Get a real participant interview in before
+> Phase 2 is called done: spontaneous two-party dialogue is where turn boundaries, overlap and
+> short filler tokens near speaker changes are hardest, and none of that is represented yet.
 
 ---
 
@@ -907,10 +915,10 @@ which arrives in Phase 3.
 | **Granite timestamp + speaker mode combination** | Undocumented. Phase 0 question 2. |
 | **Coding margin layout** | **Resolved 2026-09-01: right-hand column (D23).** Reopens the moment a coder asks for something else. |
 | **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
-| **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (interview) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
+| **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (proseminar) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
 | **Diarization model choice** | **Settled 2026-08-31: stay on community-1.** DiariZen v1/v2 benchmarked against it on 10 min excerpts: same speaker counts, near-identical speech totals and runtime (~12 s), 20% fewer/longer segments on the lecture. Not enough to justify its install — a separate env pinned to torch 2.1.1, a vendored pyannote fork, and an `LD_LIBRARY_PATH` workaround for a Rocky 8 `libstdc++` mismatch. Both DiariZen checkpoints are CC-BY-NC; community-1 is CC-BY-4.0. No DER computed: no reference labels. |
 | **Fine-tuning for disfluencies** | **Dropped 2026-08-31.** Premised on no accurate model emitting disfluencies, which was an artefact of calling CrisperWhisper through `transformers.pipeline`. `mode="verbatim"` supplies them natively. The teacher-forced groundwork (Qwen3-ASR sits at ~1% filler probability against CW2's ~0.1%) is recorded in case the premise returns. |
-| **Vocalization coverage** | Only `[laughter]`, once, in 12 windows of lecture + interview audio. Whether CW2 tags coughs/breaths is untested — this material may simply contain none. |
+| **Vocalization coverage** | Only `[laughter]`, once, in 12 windows of lecture + proseminar audio. Whether CW2 tags coughs/breaths is untested — this material may simply contain none. |
 | **Diarization at turn boundaries** | Short filler tokens near a speaker change are where max-overlap assignment is noisiest; hence smoothing within pause-bounded runs. |
 | **IRB / data governance** | Interview recordings are human-subjects data and stage 1 moves them to shared cluster storage. Assumed covered by the existing protocol; flagged because this pipeline automates the transfer. |
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
@@ -922,11 +930,12 @@ which arrives in Phase 3.
 
 ## 11. Next action
 
-**Phase 2: the renderer.** Stage 1 now emits schema v1, so the highest-value next step is to
-generate one real raw JSON from a full recording and commit it as `tests/fixtures/golden.json`
-(plan §7). Every part of stage 2 — turn grouping, within-turn anchors, speaker assignment and
-smoothing, line numbering, print CSS, both profiles, all format backends — is then a pure
-function over that file, developed and tested on any machine in milliseconds with no GPU.
+**Phase 2: the renderer.** `tests/fixtures/golden.json` exists (§7), D23 settles the coding
+margin, and stage 1 emits schema v1. Every part of stage 2 — turn grouping, within-turn
+anchors, speaker assignment and smoothing, line numbering, print CSS, both profiles, all format
+backends — is a pure function over that file, developed and tested on any machine in
+milliseconds with no GPU. Start with `render/segment.py` and the `txt` backend against the
+fixture, then the `coding` profile's HTML, since that is the deliverable students hold.
 
 Two smaller things worth doing alongside, both cheap:
 
