@@ -923,9 +923,27 @@ residue has a shape: **all eight false flags on the second window sit next to a 
 — `a` beside `d- d-`, `had` between `[UM]` and `[UH]`, `Like` after `[laughter]`, `You're` in a
 `You're you are` repair, `them's` a contraction the fluent view did not expand. The fluent
 view drops the disfluency but the dissenters also drop or reshape the word *beside* it. Two
-cheap refinements for `annotate.py`, to be measured, not assumed: **mask tokens adjacent to a
-dropped marker or partial** (would remove six of the eight), and expand `'s` contractions on
-pronouns (`them's` → `them is`) as `gonna` already is.
+cheap refinements for `annotate.py`, measured below: **mask tokens adjacent to a dropped marker
+or partial**, and expand `'s` contractions on pronouns (`them's` → `them is`) as `gonna` already
+is.
+
+**Both refinements measured** (re-analysis of the spike outputs, no GPU; TDT via 30 s windows):
+
+| fluent view | lecture 45:00: flagged / real / residue | proseminar 11:30: flagged / real / residue | residue over both |
+|---|---|---|---|
+| §7b rules as written | 6 / 5 / 1 (`Okay.`) | 8 / 0 / 8 | 9 of 422 = **2.1%** |
+| + pronoun `'s` expansion | 6 / 5 / 1 | 6 / 0 / 6 | 1.7% |
+| + adjacency mask | 5 / 4 / 1 | 5 / 0 / 5 | 1.4% |
+| **+ both** | **5 / 4 / 1** | **3 / 0 / 3** (`and`, `You're`, `be`) | **4 of 422 = 0.95%** |
+
+So the ~1% is real for a CrisperWhisper primary once the two refinements are on — and it is a
+trade, not a free lunch: the mask hides one true garble on the lecture window, the `Korshane`
+that happens to sit beside an `[UH]`. Three of the name's four garbles are still flagged, which
+is enough for a coder to see it is suspect. Both refinements are flags in `annotate.py`, on by
+default, so the trade is re-measurable without a GPU. The three residual false flags are a
+repair the fluent view does not collapse (`You're you are`), a discourse marker (`Okay.`), and
+a token at the window's edge (`be`) — the last an artefact of cutting 90 s clips, which an
+80-minute run does not have.
 
 Cost is far below the earlier ~40% estimate: ARK ~17–22×, TDT ~100×, CTC ~675× realtime
 against CrisperWhisper's ~33×, so all three add roughly **+8%** to a run (ARK dominates).
