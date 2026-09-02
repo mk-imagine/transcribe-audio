@@ -24,7 +24,7 @@ from typing import Any, Dict, List, Sequence
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from pipeline import schema  # noqa: E402
+from pipeline import disfluency, schema  # noqa: E402
 from pipeline.fluent import conjunction  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s",
@@ -79,14 +79,34 @@ def annotate(doc: Dict[str, Any], dissenter_docs: Sequence[Dict[str, Any]], path
         c2, s2 = annotate_stream(doc["secondary_stream"]["words"], diss_primary, rules)
         block["secondary_stream"] = {"mode": doc["secondary_stream"]["mode"], "stats": s2,
                                      "candidates": [c.as_dict() for c in c2]}
+    if "disfluencies" in (doc.get("annotation") or {}):
+        block["disfluencies"] = doc["annotation"]["disfluencies"]
     doc["annotation"] = block
     return doc
 
 
+def tag_disfluencies(doc: Dict[str, Any]) -> Dict[str, Any]:
+    """Repetition and repair flags on the primary's spoken words (plan §5). Opt-in."""
+    words = doc["words"]
+    spoken = [k for k, w in enumerate(words) if "silence" not in (w.get("flags") or ())]
+    res = disfluency.tag([(words[k]["text"], words[k].get("flags") or ()) for k in spoken])
+    for pos, fl in res.flags.items():
+        k = spoken[pos]
+        words[k]["flags"] = list(words[k]["flags"]) + [f for f in fl if f not in words[k]["flags"]]
+    events = [dict(e.as_dict(), abandoned=[spoken[p] for p in e.abandoned],
+                   restart=[spoken[p] for p in e.restart]) for e in res.events]
+    return {"rules": "pipeline/disfluency.py: restatement (<=3 words, fillers between, contractions "
+                     "expanded), completed partial, substitution (first word kept, one changed)",
+            "counts": res.counts(), "events": events}
+
+
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Stage 1.5: flag proper-noun candidates by dissenter conjunction.")
+    p = argparse.ArgumentParser(description="Stage 1.5: enrich a raw record. Proper-noun candidates "
+                                            "by dissenter conjunction, and/or repetition and repair tags.")
     p.add_argument("primary", help="the primary's *_raw.json")
-    p.add_argument("--dissenters", nargs="+", required=True, help="raw JSONs from the §7b models")
+    p.add_argument("--dissenters", nargs="+", default=None, help="raw JSONs from the §7b models")
+    p.add_argument("--disfluencies", action="store_true",
+                   help="also tag repetitions and repairs on the primary (opt-in; rule-based, no model)")
     p.add_argument("-o", "--output", default=None, help="default: <stem>_annotated.json beside the primary")
     p.add_argument("--min-dissenters", "--min_dissenters", dest="min_dissenters", type=int, default=None,
                    help="how many must disagree (default: all of them)")
@@ -104,13 +124,29 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> None:
     args = build_parser().parse_args()
+    if not args.dissenters and not args.disfluencies:
+        logger.error("nothing to do: pass --dissenters and/or --disfluencies")
+        sys.exit(2)
     src = Path(args.primary)
     try:
         doc = schema.read(src)
-        diss = [schema.read(Path(p)) for p in args.dissenters]
+        diss = [schema.read(Path(p)) for p in (args.dissenters or [])]
     except (OSError, ValueError) as exc:
         logger.error("%s", exc)
         sys.exit(2)
+    stem = src.stem[:-4] if src.stem.endswith("_raw") else src.stem
+    out = Path(args.output) if args.output else src.parent / f"{stem}_annotated.json"
+
+    if args.disfluencies:
+        block = tag_disfluencies(doc)
+        doc.setdefault("annotation", {"created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")})
+        doc["annotation"]["disfluencies"] = block
+        logger.info("disfluencies: %s", block["counts"] or "none found")
+
+    if not diss:
+        schema.write(out, doc)
+        return
+
     if len(diss) < 3 and args.min_dissenters is None:
         logger.error("%d dissenter(s) given; the conjunction needs three independent lineages (D18). "
                      "Pass --min-dissenters to run with fewer.", len(diss))
@@ -148,8 +184,6 @@ def main() -> None:
     for c in doc["annotation"]["primary"]["candidates"]:
         state = "masked " if c["masked"] else ("allowed" if c["allowlisted"] else "FLAGGED")
         logger.info("  %s %-20s adjacent=%s name_like=%s", state, c["token"], c["adjacent_disfluency"], c["name_like"])
-    stem = src.stem[:-4] if src.stem.endswith("_raw") else src.stem
-    out = Path(args.output) if args.output else src.parent / f"{stem}_annotated.json"
     schema.write(out, doc)
 
 

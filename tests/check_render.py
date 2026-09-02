@@ -313,6 +313,16 @@ def _():
     assert "[NAME?]" not in fmt_plain.render(turns, st, params)
 
 
+@check("a repair reparandum gets a faint mark in html only; a repetition gets none")
+def _():
+    (turns, st), params, _ = _prepare("coding")
+    ws = turns[0].sentences[0].words
+    ws[0].flags = tuple(ws[0].flags) + ("repair",); ws[1].flags = tuple(ws[1].flags) + ("repetition",)
+    html = fmt_html.render(turns, st, params); txt = fmt_txt.render(turns, st, params)
+    assert f'<span class="reparandum">{ws[0].text}</span>' in html and ".reparandum" in html
+    assert "repetition" not in html.split("</style>")[1] and "[repair]" not in txt and "[repetition]" not in txt
+
+
 @check("silence tokens never reach the renderer: dropped at to_rwords, so pauses stay visible")
 def _():
     ws = to_rwords([{"i": 0, "text": "a", "start": 0.0, "end": 0.3, "flags": []},
