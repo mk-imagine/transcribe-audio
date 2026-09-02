@@ -42,6 +42,15 @@ COURSES: Dict[str, dict] = {
     "896": {"name": "Lab", "days": ("Fri",), "time": None},
 }
 
+#: Files the calendar cannot place, or places wrongly: current name -> (code, week, day).
+#: A file listed here is renamed from this table and nothing is inferred from its
+#: name. This is where a recorder whose date was wrong, or a file that arrived
+#: under some other name, gets pinned by the person who knows what it is.
+OVERRIDES: Dict[str, Tuple[str, int, str]] = {
+    "tate_1.m4a": ("777", 1, "Mon"),
+    "260831_0015.wav": ("777", 1, "Wed"),      # the recorder's date says Monday; the lecture was Wednesday
+}
+
 #: Department prefix in the new name.
 PREFIX = "PSY"
 
@@ -100,12 +109,39 @@ def target_name(code: str, week: int, day: date, ext: str, *,
 
 
 def plan(directory: Path, *, start: date = SEMESTER_START, courses: Dict[str, dict] = COURSES,
-         prefix: str = PREFIX) -> Tuple[List[Tuple[Path, Path]], List[Tuple[Path, str]]]:
+         prefix: str = PREFIX, overrides: Dict[str, Tuple[str, int, str]] = OVERRIDES,
+         ) -> Tuple[List[Tuple[Path, Path]], List[Tuple[Path, str]]]:
     """(renames, skipped). Pure: touches nothing."""
     parsed = []
     skipped: List[Tuple[Path, str]] = []
-    for p in sorted(directory.iterdir()):
+    renames: List[Tuple[Path, Path]] = []
+    targets: Dict[Path, Path] = {}
+
+    def claim(p: Path, new: Path) -> None:
+        if new == p:
+            return
+        if new.exists():
+            skipped.append((p, f"target {new.name} already exists; not overwriting"))
+        elif new in targets:
+            skipped.append((p, f"target {new.name} is also claimed by {targets[new].name}"))
+        else:
+            targets[new] = p
+            renames.append((p, new))
+
+    # Overrides first: pinned by hand, inferred from nothing.
+    for name, (code, week, day) in overrides.items():
+        p = directory / name
         if not p.is_file():
+            skipped.append((p, "override names a file that is not here"))
+            continue
+        if code not in courses or day not in WEEKDAYS or week < 1:
+            skipped.append((p, f"override ({code}, {week}, {day}) names an unknown course or day"))
+            continue
+        ext = p.suffix.lstrip(".").lower() or "wav"
+        claim(p, p.with_name(f"{prefix}{code}-week{week}-{day}.{ext}"))
+
+    for p in sorted(directory.iterdir()):
+        if not p.is_file() or p.name in overrides:
             continue
         r = parse_recorder_name(p.name)
         if r is None:
@@ -123,8 +159,6 @@ def plan(directory: Path, *, start: date = SEMESTER_START, courses: Dict[str, di
         for n, (_, p) in enumerate(items, 1):
             same_day_index[p] = n if len(items) > 1 else None
 
-    renames: List[Tuple[Path, Path]] = []
-    targets: Dict[Path, Path] = {}
     for p, d, seq, ext in parsed:
         week = week_number(d, start)
         if week is None:
@@ -135,17 +169,7 @@ def plan(directory: Path, *, start: date = SEMESTER_START, courses: Dict[str, di
         if code is None:
             skipped.append((p, f"{d} ({WEEKDAYS[d.weekday()]}): {why}"))
             continue
-        new = p.with_name(target_name(code, week, d, ext, same_day_index=same_day_index[p], prefix=prefix))
-        if new == p:
-            continue
-        if new.exists():
-            skipped.append((p, f"target {new.name} already exists; not overwriting"))
-            continue
-        if new in targets:
-            skipped.append((p, f"target {new.name} is also claimed by {targets[new].name}"))
-            continue
-        targets[new] = p
-        renames.append((p, new))
+        claim(p, p.with_name(target_name(code, week, d, ext, same_day_index=same_day_index[p], prefix=prefix)))
     return renames, skipped
 
 
@@ -163,7 +187,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"not a directory: {directory}", file=sys.stderr)
         return 2
     print(f"semester start {args.start} ({WEEKDAYS[args.start.weekday()]}); "
-          + "; ".join(f"{args.prefix} {c} on {'/'.join(v['days'])}" for c, v in COURSES.items()))
+          + "; ".join(f"{args.prefix} {c} on {'/'.join(v['days'])}" for c, v in COURSES.items())
+          + (f"; {len(OVERRIDES)} override(s)" if OVERRIDES else ""))
     renames, skipped = plan(directory, start=args.start, prefix=args.prefix)
     for old, new in renames:
         print(f"  {old.name:24s} -> {new.name}")
