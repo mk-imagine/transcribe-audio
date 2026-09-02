@@ -445,6 +445,20 @@ def _():
     assert _speaker_at(0.0, []) is None
 
 
+# ------------------------------------------------------------ dissenters ----
+
+@check("the three §7b dissenters resolve, declare no timestamps, and route to forced alignment")
+def _():
+    for mid in ("Audio8/ARK-ASR-0.6B", "nvidia/parakeet-tdt-0.6b-v3",
+                "ibm-granite/granite-speech-5.0-470m-turboctc"):
+        spec = resolve(mid); cls = load_adapter_class(spec)
+        c = cls.capabilities
+        assert c.word_timestamps == "none" and c.verbatim == "no" and c.longform == "needs_chunking", (mid, c)
+        p = plan_for(c, diarize_requested=False)
+        assert p.forced_alignment and p.timing_source == "aligned" and p.chunking
+        assert not plan_for(c, mode="verbatim").ok
+
+
 # ---------------------------------------------------------- granite parsing --
 
 @check("Granite timestamps unwrap across the 10-second rollover, per the card's algorithm")

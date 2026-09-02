@@ -27,10 +27,15 @@ def _css(profile_name: str) -> str:
 def _word(w: RWord) -> str:
     text = _html.escape(w.text)
     if w.is_marker or "filled_pause" in w.flags or "vocalization" in w.flags:
-        return f'<span class="marker">{text}</span>'
-    if "partial_word" in w.flags:
-        return f'<span class="partial">{text}</span>'
-    return text
+        inner = f'<span class="marker">{text}</span>'
+    elif "partial_word" in w.flags:
+        inner = f'<span class="partial">{text}</span>'
+    else:
+        inner = text
+    if "proper_noun_candidate" in w.flags:
+        # Every dissenter disagreed with this token (§7b). Marked, never corrected.
+        return f'<span class="candidate">{inner}</span><sup class="cand-mark">[NAME?]</sup>'
+    return inner
 
 
 def _stamp_block(stamp: Dict[str, Any]) -> str:

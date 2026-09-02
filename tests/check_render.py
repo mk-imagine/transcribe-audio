@@ -302,6 +302,26 @@ def _():
 
 # ------------------------------------------------------------------ CLI ----
 
+@check("a proper_noun_candidate renders as [NAME?] in txt and a marked span in html; plain stays clean")
+def _():
+    (turns, st), params, _ = _prepare("coding")
+    w = turns[0].sentences[0].words[1]
+    w.flags = tuple(w.flags) + ("proper_noun_candidate",)
+    txt = fmt_txt.render(turns, st, params); html = fmt_html.render(turns, st, params)
+    assert f"{w.text} [NAME?]" in txt, txt[:300]
+    assert 'class="candidate"' in html and "[NAME?]" in html and ".candidate" in html
+    assert "[NAME?]" not in fmt_plain.render(turns, st, params)
+
+
+@check("silence tokens never reach the renderer: dropped at to_rwords, so pauses stay visible")
+def _():
+    ws = to_rwords([{"i": 0, "text": "a", "start": 0.0, "end": 0.3, "flags": []},
+                    {"i": 1, "text": "_", "start": 0.3, "end": 1.4, "flags": ["silence"]},
+                    {"i": 2, "text": "b", "start": 1.4, "end": 1.7, "flags": []}])
+    assert [w.text for w in ws] == ["a", "b"]
+    assert segment.gap(ws[0], ws[1]) > 0.5, "the pause the silence token spanned must survive"
+
+
 @check("the CLI renders both profiles end to end and names outputs by profile")
 def _():
     with tempfile.TemporaryDirectory() as td:
