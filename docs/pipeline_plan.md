@@ -352,7 +352,7 @@ Anything recomputable from data is recomputed in stage 2.
 src/
   [x] transcribe_audio.py      # stage 1 CLI (keeps its name: the SLURM wrappers call it)
   [ ] annotate.py              # stage 1.5 CLI
-  [ ] render.py                # stage 2 CLI
+  [x] render.py                # stage 2 CLI
   pipeline/
     [x] capabilities.py        # Capabilities, ModelSpec, plan_for()
     [x] registry.py            # REGISTRY: model_id -> ModelSpec, exact match only
@@ -370,10 +370,20 @@ src/
     [x] orchestrator.py        # dispatch from the declaration; assembles the record
     [x] preview.py             # stage-1 text preview, superseded by render.py
     [ ] align.py               # forced-alignment gap-filler
-  [ ] render/                  # Phase 2: segment, speakers, formats, templates
+  render/
+    [x] __init__.py            # RWord, Sentence, Turn, Profile, PROFILES, stream selection
+    [x] speakers.py            # max-overlap assignment, island smoothing, name map
+    [x] segment.py             # sentences, turns, within-turn anchors
+    [x] stamp.py               # the version stamp every render carries
+    formats/
+      [x] txt.py  plain.py  html.py
+      [ ] tex.py               # optional (D11); not built
+    templates/
+      [x] base.css  coding.css  lecture.css
 tests/
-  [x] check_contract.py        # 31 dependency-free checks
-  [ ] fixtures/golden.json     # committed; renderer tests need no models
+  [x] check_contract.py        # 41 dependency-free checks: stage 1 dispatch + the fixture
+  [x] check_render.py          # 21 dependency-free checks: stage 2 against the fixture
+  [x] fixtures/golden.json     # committed; renderer tests need no models
 ```
 
 ### CLI shapes
@@ -579,14 +589,31 @@ Two ~80 min recordings, CrisperWhisper word-level timestamps on an A100, `--clea
 **Punctuation is not sparse.** It alone yields a sentence every 4.7–7.0 s, so it is the primary
 signal and the pause rule supplements it — the reverse of what was assumed here previously.
 
-**Provisional default: `--pause-threshold 0.3`.** Both recordings agree closely despite
-differing genre and speech rate; 0.2 s fragments sentences, 0.5 s merges them.
+~~**Provisional default: `--pause-threshold 0.3`.**~~ Superseded below.
 
-**Do not harden that number yet.** 59% of inter-word gaps are exactly 0.000 s in both files —
-an artifact of `_adjust_pauses` (bug 8), which collapses every gap below `split_threshold`
-(0.12 s) and shortens the rest by the same amount. The 0.3 s figure is measured against
-already-distorted data and corresponds to roughly 0.42 s of real silence. Re-derive it once
-pause adjustment moves to stage 2.
+#### Re-derived on raw timestamps (2026-09-01)
+
+Bug 8 is fixed and the fixture carries raw CrisperWhisper timestamps, so the number above
+was re-measured. Two findings.
+
+**The 0.000 s gaps were not bug 8.** 72% of inter-word gaps in the fixture are exactly zero
+with no pause adjustment anywhere in the path. That is the Viterbi aligner's nature — it
+partitions the timeline, so a word's end is usually the next word's start — not an artefact.
+The earlier attribution to `_adjust_pauses` was at most half right.
+
+**0.5 s, not 0.3.** On the 10-minute fixture (182 wpm):
+
+| threshold | pause boundaries | one every |
+|---|---|---|
+| 0.3 s | 256 | 2.3 s — fragments |
+| **0.5 s** | **126** | **4.8 s** |
+| 0.75 s | 58 | 10.3 s |
+| terminal punctuation | 114 | 5.3 s |
+
+At 0.3 s the pause rule fires twice as often as punctuation and splits mid-phrase; at 0.5 s
+it matches punctuation's cadence and supplements it. **`--pause-threshold 0.5` is the
+default.** Still a flag; re-rendering is instant, and `tests/check_render.py` asserts the
+ratio stays within 2× so a future recording that breaks the assumption is noticed.
 
 All thresholds are CLI flags. Re-rendering is instant, so tune them against real transcripts
 rather than guessing up front.
@@ -843,6 +870,34 @@ as a warning rather than pretending to have timings.
 Speaker assignment with boundary smoothing, turn grouping, within-turn anchors, both profiles,
 print CSS, speaker map file, `txt`/`plain`/`html`. Developed entirely against `golden.json`.
 
+**Done (2026-09-01).** `src/render.py` and `src/render/`, zero dependencies, verified against
+the fixture by 21 checks that run in milliseconds anywhere:
+
+```bash
+python src/render.py transcripts/x_raw.json --profile coding            # txt + html
+python src/render.py transcripts/x_raw.json --profile lecture --format html,plain \
+    --speaker-map x_speakers.yaml --anchor-interval 45
+```
+
+What it does, in order: pick the stream the profile wants (verbatim for coding, intended for
+lecture, with a stamped warning if the record lacks it) → max-overlap speaker assignment with
+nearest-turn fallback for words in diarizer gaps → island smoothing inside pause-bounded runs
+(≤2 words flanked by an agreeing speaker, edges left alone) → name map → sentences
+(punctuation ∨ pause > 0.5 s ∨ speaker change) → turns (consecutive same-speaker sentences:
+the diarizer's 59 segments become 7) → within-turn anchors every 30 s / 60 s snapped to a
+sentence start → txt / plain / html, each carrying the version stamp.
+
+Two things measured on the way. The pause threshold moved to 0.5 s (§6). And timestamps are
+shown in the **original recording's** time: the excerpt offset stage 1 recorded is applied,
+so a coder checking the audio at `00:05:30` finds it there rather than 300 s off.
+
+One wrapping bug caught by the checks and worth remembering: `textwrap` splits on hyphens by
+default, so `self-report` at a line end became `self-` — indistinguishable from a
+`partial_word` in a verbatim transcript. Both text formats now wrap between tokens only.
+
+Not built: `tex` (optional, D11), `docx` (deferred, D16), and `annotate.py` (stage 1.5),
+which is where `repetition`/`repair` tagging goes when a detector is chosen.
+
 ### Phase 3 — Second adapter
 
 Granite 4.1-plus. Exercises `end_only` timestamps, silence tokens and native speaker labels,
@@ -930,25 +985,25 @@ which arrives in Phase 3.
 
 ## 11. Next action
 
-**Phase 2: the renderer.** `tests/fixtures/golden.json` exists (§7), D23 settles the coding
-margin, and stage 1 emits schema v1. Every part of stage 2 — turn grouping, within-turn
-anchors, speaker assignment and smoothing, line numbering, print CSS, both profiles, all format
-backends — is a pure function over that file, developed and tested on any machine in
-milliseconds with no GPU. Start with `render/segment.py` and the `txt` backend against the
-fixture, then the `coding` profile's HTML, since that is the deliverable students hold.
+**Put a real transcript in front of the coders.** Phases 1 and 2 are built; the question now
+is whether the coding profile is usable on paper, and only the students who mark these up can
+answer it. Render `tests/fixtures/golden.json` (or any stage-1 record) with
+`--profile coding`, print the HTML, and hand it over. Two things to watch for:
 
-Two smaller things worth doing alongside, both cheap:
+- **D23's right-hand margin** — enough room, or do they want double-spaced lines? Five-minute
+  CSS change either way.
+- **Sentence-per-line numbering** — a pause-split fragment is its own numbered line by design
+  (it shows exactly where the speaker hesitated), but it is also more lines to cite. See
+  whether that helps or annoys.
 
-- **The `prototype` SLURM profile.** `run_transcription.sh` still requests 8-hour GPU jobs,
-  which is the shape a scheduler defers. A `--time=00:15:00` single-GPU job is what backfill
-  slots in immediately, and the verification runs in §8 show minutes of GPU time is all a
-  90 s window needs.
-- **Re-derive the pause threshold.** Bug 8 is fixed, so the 0.3 s default was measured against
-  distorted data and needs redoing against a current run (§6).
+**Get a participant interview recording onto the cluster** (§7). The coding profile has been
+developed against a guest lecture with host interaction. Spontaneous two-party dialogue —
+overlap, short turns, fillers at speaker changes — is where assignment and smoothing are
+hardest, and none of it is represented in the fixture.
 
-Phase 0's remaining question — whether Granite 4.1-plus can combine timestamp and
-speaker-attribution modes in one prompt — is Phase 3's problem, and the registry already holds
-its declared shape so the adapter has a target to hit.
+Then Phase 3: the Granite 4.1-plus adapter, which exercises `end_only` timestamps, silence
+tokens and native speaker labels — the paths that prove the capability contract was not
+written around one model. The registry already holds its declared shape.
 
 ---
 

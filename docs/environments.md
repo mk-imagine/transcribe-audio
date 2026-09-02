@@ -128,6 +128,19 @@ refused rather than guessed at, so a new checkpoint needs a `ModelSpec` in
 `python3 tests/check_contract.py` runs 31 dependency-free checks — it needs no models, no
 GPU and no packages, so it runs on the Mac and on the login node alike.
 
+### Running stage 2
+
+Anywhere, including the Mac with nothing installed — it is pure Python over the JSON:
+
+```bash
+python3 src/render.py transcripts/out/<name>_raw.json --profile coding      # txt + html
+python3 src/render.py transcripts/out/<name>_raw.json --profile lecture --format html,plain
+```
+
+Outputs `<name>_<profile>.txt`, `.html` (print with Cmd+P; the coding margin is in the
+`@page` rule) and `_plain.txt`. `--speaker-map` takes a file of `SPEAKER_00: Name` lines.
+`python3 tests/check_render.py` runs the 21 stage-2 checks against the committed fixture.
+
 ### Data
 
 `~/Repos/transcribe-audio/data/` — human-subjects material, do not copy off-cluster.
