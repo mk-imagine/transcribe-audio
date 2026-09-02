@@ -109,6 +109,16 @@ def main() -> None:
     if len(lineages) < len(diss):
         logger.error("the same model appears twice among the dissenters: %s", sorted(lineages, key=str))
         sys.exit(2)
+    # A dissenter with no text disagrees with everything, which is not evidence:
+    # the conjunction silently degrades to the remaining models. Refuse it.
+    n_primary = len(tokens_of(doc))
+    for path, d in zip(args.dissenters, diss):
+        n = len(tokens_of(d))
+        if n < 0.25 * n_primary:
+            logger.error("%s has %d tokens against the primary's %d: a dissenter that produced "
+                         "(almost) nothing cannot vote. Re-run it; do not annotate without it.",
+                         path, n, n_primary)
+            sys.exit(2)
 
     rules = {"expand_pronoun_s": args.expand_pronoun_s, "mask_adjacent": args.mask_adjacent,
              "exempt_name_like": args.exempt_name_like, "min_dissenters": args.min_dissenters}

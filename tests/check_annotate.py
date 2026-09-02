@@ -148,6 +148,11 @@ def _():
         ann = out["annotation"]
         assert [d["model_id"] for d in ann["dissenters"]] == ids and all(d["revision"] for d in ann["dissenters"])
         assert "secondary_stream" in ann and ann["secondary_stream"]["mode"] == "intended"
+        # a dissenter with (almost) no tokens is refused: it would vote against everything
+        empty = td / "empty_raw.json"; schema.write(empty, _dissenter_doc(base, "just three words", ids[0], 9))
+        r0 = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(prim), "--dissenters",
+                             str(empty), dpaths[1], dpaths[2]], capture_output=True, text=True)
+        assert r0.returncode == 2 and "cannot vote" in r0.stderr, r0.stderr[-300:]
         # fewer than three dissenters is refused unless asked for
         r2 = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(prim), "--dissenters", dpaths[0]],
                             capture_output=True, text=True)

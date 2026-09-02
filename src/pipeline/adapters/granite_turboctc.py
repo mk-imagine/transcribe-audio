@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Any, List, Union
 
-from pipeline.adapters.base import Adapter, AdapterResult, Word
+from pipeline.adapters.base import Adapter, AdapterResult, ErrorRange, Word
 from pipeline.capabilities import Capabilities
 from pipeline.chunking import transcribe_windows
 
@@ -45,6 +45,12 @@ class GraniteTurboCtcAdapter(Adapter):
         path = str(audio_path)
         params = {"window_s": WINDOW_S, "chunk_length_s": None, "decoding": "CTC greedy"}
         words, errors = transcribe_windows(lambda s, e: self._window(path, s, e), duration, segment_size=WINDOW_S)
+        if not words and not errors and duration > 5.0:
+            # A model that emits nothing for a stretch of speech has failed,
+            # whatever its exit status. Recording it as a lost range makes the
+            # run exit 1 -- the first ARK run through this adapter produced zero
+            # words and reported success.
+            errors = [ErrorRange(0.0, duration, "model produced no text for the whole file")]
         return AdapterResult(words=words, text=" ".join(w.text for w in words), errors=errors,
                              params=params, backend="transformers")
 
