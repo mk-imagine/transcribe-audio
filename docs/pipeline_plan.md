@@ -70,6 +70,7 @@ Settled. Each entry records what would reopen it.
 | D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
 | D20 | **Use `mamba` for all environment management, never `conda`.** | Faster resolution, and `src/transcribe.slurm` already activates through it — mixing the two invites drift between what a job activates and what was built. Build fresh rather than `--clone`: clones hardlink, so pip in a clone can strip packages from the source env. | — |
 | D21 | **Hotwords are a declared capability, and the standard CrisperWhisper 2 checkpoints declare `untrained`.** | Hotword boosting is trained into the Pro checkpoints only. On a standard checkpoint the package accepts the argument, raises a `UserWarning` and can *degrade* transcription -- measured, it did (§3). A run may still pass them; it warns, and the warning is written into the record. | Nyra documents hotword training for the standard weights, or a Pro licence is bought |
+| D23 | **The coding margin is a right-hand column.** | Decided 2026-09-01 without polling the coders: a wide right margin is the conventional layout for handwritten codes on a printed transcript, it is a five-minute CSS change either way, and deciding it lets Phase 2 proceed. | The student coders ask for double-spaced lines to write between instead — or anything else. **Explicitly not a point of no return.** |
 | ~~D22~~ | **Withdrawn 2026-09-01, the same day it was added.** It claimed proper-noun spelling should come from the `intended` stream. The measurement behind it was wrong (§3): a substring regex scored `Courchesney` as a match for `Courchesne`. The number is not reused; the open question is tracked in §10. | — | — |
 | D19 | **Read the model's own docs before writing an integration; never assume a generic loader is correct.** | A generic loader that runs is not evidence it runs correctly — the failure is silent and produces self-consistent wrong measurements. See the callout at the head of §3 for three worked instances. | — |
 | D18 | **Proper-noun detection by three-dissenter conjunction (§7b), compared on a fluent view.** | Glossaries cannot be built ahead of an arbitrary lecture, but cross-model disagreement localises garbles without one. Dissenters must come from independent lineages. | A single model gains reliable proper-noun accuracy |
@@ -630,10 +631,10 @@ pyannote emits `SPEAKER_00`. The existing transcript already shows real names be
 ("Dr. Geisler" alongside "Speaker C"), so this step exists informally. Make it an editable map
 file read at render time: identify once, re-render forever, fix a misattribution without a GPU.
 
-### OPEN — layout detail
+### Layout detail — resolved (D23)
 
-Whether the coding margin should be a right-hand column or double-spaced lines to write
-between. Ask the students who mark these up; it is a five-minute CSS change once known.
+The coding margin is a **right-hand column**. Decided without polling the coders so Phase 2
+can proceed; it is a five-minute CSS change if they ask for double-spaced lines instead.
 
 ---
 
@@ -904,7 +905,7 @@ which arrives in Phase 3.
 | Item | Status |
 |---|---|
 | **Granite timestamp + speaker mode combination** | Undocumented. Phase 0 question 2. |
-| **Coding margin layout** | Right-hand column vs. double-spaced. Ask the student coders. |
+| **Coding margin layout** | **Resolved 2026-09-01: right-hand column (D23).** Reopens the moment a coder asks for something else. |
 | **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
 | **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (interview) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
 | **Diarization model choice** | **Settled 2026-08-31: stay on community-1.** DiariZen v1/v2 benchmarked against it on 10 min excerpts: same speaker counts, near-identical speech totals and runtime (~12 s), 20% fewer/longer segments on the lecture. Not enough to justify its install — a separate env pinned to torch 2.1.1, a vendored pyannote fork, and an `LD_LIBRARY_PATH` workaround for a Rocky 8 `libstdc++` mismatch. Both DiariZen checkpoints are CC-BY-NC; community-1 is CC-BY-4.0. No DER computed: no reference labels. |
