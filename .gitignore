@@ -99,3 +99,7 @@ __pycache__/
 # documents the convention so it survives a fresh clone.
 /hpc/*
 !/hpc/README.md
+
+# Environment build recipes are source, not scratch. A global exclude on this
+# machine ignores envs/ (the conda convention); the repo rule wins.
+!/envs/

@@ -249,6 +249,7 @@ class _Args:
         self.hotwords_list = []
         self.timestamp_mode = "word"
         self.dual_stream = False
+        self.compute_type = None
         self.source_path = None
         self.start_time = None
         self.end_time = None
@@ -384,6 +385,21 @@ def _():
     assert "[intended stream]" in intended and "[verbatim stream]" in verbatim
 
 
+@check("CrisperWhisper picks a compute type the device can run: float32 on CPU")
+def _():
+    from pipeline.adapters.crisperwhisper2 import CrisperWhisper2Adapter as A
+    assert A.default_compute_type("cpu") == "float32"
+    assert A.default_compute_type("cuda") == "float16"
+    assert A.default_compute_type("cuda:1") == "float16"
+    a = A("nyralabs/CrisperWhisper2.0_large", "cpu", compute_type="int8")
+    assert a.compute_type == "int8", "an explicit choice must be honoured"
+    try:
+        A("nyralabs/CrisperWhisper2.0_large", "cpu", compute_type="bfloat16")
+    except ValueError:
+        return
+    raise AssertionError("an undocumented compute type was accepted")
+
+
 @check("the validator catches a malformed document")
 def _():
     doc = _run("mock/start-end")
@@ -491,6 +507,43 @@ def _():
 def _():
     assert flags.tag("_") == ("silence",)
     assert flags.tag("word_") == ()
+
+
+# ---------------------------------------------------------------- fixture --
+
+FIXTURE = ROOT / "tests" / "fixtures" / "golden.json"
+
+
+@check("the committed fixture is a valid schema-v1 record")
+def _():
+    assert FIXTURE.exists(), f"{FIXTURE} is missing"
+    doc = json.loads(FIXTURE.read_text())
+    assert schema.validate(doc) == [], schema.validate(doc)
+    assert doc["schema_version"] == "1.0"
+
+
+@check("the fixture has what stage 2 needs: both streams, turns, flags, no holes")
+def _():
+    doc = json.loads(FIXTURE.read_text())
+    assert doc["secondary_stream"] and doc["secondary_stream"]["mode"] == "intended"
+    assert doc["secondary_stream"]["words"], "intended stream must carry words"
+    assert len(doc["speaker_turns"]) >= 10, "too few turns to exercise turn grouping"
+    assert len({t["speaker"] for t in doc["speaker_turns"]}) >= 2, "single-speaker fixture"
+    flags = {f for w in doc["words"] for f in w["flags"]}
+    assert "filled_pause" in flags, "no filled pauses: the coding profile has nothing to show"
+    assert doc["errors"] == [], "the fixture must have a complete timeline"
+    assert all(w["timing_source"] == "native" for w in doc["words"])
+
+
+@check("the fixture carries provenance and no cluster user id")
+def _():
+    doc = json.loads(FIXTURE.read_text())
+    asr, run = doc["asr"], doc["run"]
+    assert asr["revision"] and doc["diarization"]["revision"], "model revisions missing"
+    assert run["pipeline_version"]["commit"], "pipeline commit missing"
+    assert doc["source"]["audio_sha256"], "audio hash missing"
+    assert not doc["source"]["audio_path"].startswith("/"), "absolute cluster path leaked"
+    assert "918204214" not in FIXTURE.read_text(), "cluster user id leaked into the fixture"
 
 
 def main():

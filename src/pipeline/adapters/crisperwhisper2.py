@@ -42,17 +42,42 @@ class CrisperWhisper2Adapter(Adapter):
 
     OTHER_MODE = {"verbatim": "intended", "intended": "verbatim"}
 
+    # CTranslate2's documented compute types (package docstring): float16,
+    # int8_float16, int8, float32. The package defaults to float16 regardless of
+    # device, and ct2 refuses float16 on CPU outright -- so a CPU run died at
+    # model load with "target device or backend do not support efficient
+    # float16 computation". D13 makes CPU a development target.
+    COMPUTE_TYPES = ("float16", "int8_float16", "int8", "float32")
+
     def __init__(self, model_id: str, device, *, mode: str = "verbatim",
                  hotwords: Optional[List[str]] = None, backend: str = "auto",
-                 language: str = "en", dual_stream: bool = False, **options: Any):
+                 language: str = "en", dual_stream: bool = False,
+                 compute_type: Optional[str] = None, **options: Any):
         super().__init__(model_id, device, **options)
         self.mode = mode
         self.hotwords = list(hotwords or [])
         self.backend = backend
         self.language = language
         self.dual_stream = dual_stream
+        if compute_type is not None and compute_type not in self.COMPUTE_TYPES:
+            raise ValueError(
+                f"compute_type={compute_type!r} is not one of {self.COMPUTE_TYPES}"
+            )
+        self.compute_type = compute_type
+        self._resolved_compute_type: Optional[str] = None
         self.model = None
         self._resolved_backend: Optional[str] = None
+
+    @staticmethod
+    def default_compute_type(device: str) -> str:
+        """float16 on CUDA; float32 on CPU.
+
+        Not int8 on CPU: the CPU target exists for behavioural questions where
+        the output should match production as closely as possible, and int8
+        quantisation changes the numerics. Slow is acceptable there; different
+        is not. Pass --compute_type int8 explicitly to trade the one for the other.
+        """
+        return "float16" if str(device).startswith("cuda") else "float32"
 
     # -- load ---------------------------------------------------------------
 
@@ -81,11 +106,13 @@ class CrisperWhisper2Adapter(Adapter):
             )
 
         device_str = "cuda" if str(self.device).startswith("cuda") else "cpu"
+        self._resolved_compute_type = self.compute_type or self.default_compute_type(device_str)
         logger.info(
-            "Loading CrisperWhisper 2: %s on %s (mode=%s, hotwords=%d, backend=%s)",
+            "Loading CrisperWhisper 2: %s on %s (mode=%s, hotwords=%d, backend=%s, compute_type=%s)",
             self.model_id, device_str, self.mode, len(self.hotwords), self.backend,
+            self._resolved_compute_type,
         )
-        kwargs = {"device": device_str}
+        kwargs = {"device": device_str, "compute_type": self._resolved_compute_type}
         if self.backend and self.backend != "auto":
             kwargs["backend"] = self.backend
         self.model = CrisperWhisperModel(self.model_id, **kwargs)
@@ -107,6 +134,7 @@ class CrisperWhisper2Adapter(Adapter):
             "mode": self.mode,
             "word_timestamps": True,
             "hotwords": self.hotwords or None,
+            "compute_type": self._resolved_compute_type,
             # Package defaults, recorded explicitly so the provenance block says
             # what ran rather than what the version installed that day defaulted to.
             "longform_strategy": "continuation",

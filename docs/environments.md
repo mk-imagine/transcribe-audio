@@ -80,7 +80,8 @@ Use `${PIPESTATUS[0]}`.
 
 | env | torch | transformers | purpose |
 |---|---|---|---|
-| **`cw2native`** | 2.13.0 | 5.16.1 | **Primary**, and the default `transcribe.slurm` activates. `crisperwhisper` 2.0.2 — the supported way to run CrisperWhisper (D17). **No pyannote**, so runs here need `--no_diarize`. |
+| **`cw2diar`** | 2.8.0 | — | **Complete stage 1**: `crisperwhisper[ct2]` 2.0.2 **and** `pyannote.audio` 4.0.3 in one env, so a single run gives verbatim words and diarization. Built 2026-09-01 for the Phase 2 fixture. The two do not conflict: pyannote pins `torch==2.8.0`, and the ct2 backend needs no torch at all. No `transformers`, so no float32 CT2 conversion here — do that in `cw2native` first if a CPU run is needed. |
+| **`cw2native`** | 2.13.0 | 5.16.1 | `crisperwhisper` 2.0.2 — the supported way to run CrisperWhisper (D17); the default `transcribe.slurm` activates. Carries torch+transformers, so it can convert a CT2 model to a new compute type. **No pyannote**, so runs here need `--no_diarize`. |
 | `audio-transcribe` | 2.8.0 | 4.57.3 | pyannote 4.0.3 + peft. Diarization and generic models. |
 | `audio-transcribe-tf5` | 2.8.0 | 5.16.1 | Granite 4.1/`granite_speech_plus`, Qwen3-ASR, Parakeet — all need transformers ≥ 5.13. |
 | `audio-transcribe-crisper` | 2.8.0 | 4.37.2 | nyrahealth transformers fork for CrisperWhisper **v1**. Obsolete under D17; delete once nothing references it. |
@@ -107,6 +108,11 @@ python -u transcribe_audio.py -i ../data/geisler.wav -o ../transcripts/out \
     --start_time 00:45:00 --end_time 00:46:30 --no_diarize --mode verbatim
 ```
 
+Add `--compute_type` to override the numeric type; the default is float16 on CUDA and
+float32 on CPU, because ct2 refuses float16 on CPU. The first run at a new compute type
+converts the CT2 model (a minute or two; needs torch+transformers, i.e. `cw2native`) and caches
+it under `~/.cache/crisperwhisper/`.
+
 Granite 4.1-plus runs in `audio-transcribe-tf5` (`--model ibm-granite/granite-speech-4.1-2b-plus`,
 no `--no_diarize` needed: it attributes speakers itself). Two passes per 200 s window, about
 2.2× realtime on the A100.
@@ -126,6 +132,21 @@ refused rather than guessed at, so a new checkpoint needs a `ModelSpec` in
 `python3 tests/check_contract.py` runs 31 dependency-free checks — it needs no models, no
 GPU and no packages, so it runs on the Mac and on the login node alike.
 
+### Running stage 2
+
+Anywhere, including the Mac with nothing installed — it is pure Python over the JSON:
+
+```bash
+python3 src/render.py transcripts/out/<name>_raw.json --profile coding      # txt + html
+python3 src/render.py transcripts/out/<name>_raw.json --profile lecture --format html,plain
+```
+
+Outputs `<name>_<profile>.txt`, `.html` (print with Cmd+P; the coding margin is in the
+`@page` rule) and `_plain.txt`. `--speaker-map` takes a file of `SPEAKER_00: Name` lines; a `<name>_speakers.yaml` beside
+the input is used automatically, and two labels may map to one name to merge an over-split
+speaker. Labels are per-recording, so each recording gets its own sidecar.
+`python3 tests/check_render.py` runs the 21 stage-2 checks against the committed fixture.
+
 ### Data
 
 `~/Repos/transcribe-audio/data/` — human-subjects material, do not copy off-cluster.
@@ -133,7 +154,7 @@ GPU and no packages, so it runs on the Mac and on the login node alike.
 | file | duration | notes |
 |---|---|---|
 | `geisler.wav` | 91.7 min | Lecture, **disfluency-rich** — the reference for verbatim testing. 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
-| `251211_0009.wav` | 80.7 min | Multi-speaker interview — the real use case. |
+| `251211_0009.wav` | 80.7 min | **Proseminar guest lecture** — a visiting professor presenting their research, with host interaction. Multi-speaker, and the source of `tests/fixtures/golden.json`. *Not* a research-participant interview: there is no interview recording in `data/` yet. |
 | `tate_1.m4a` | 79.0 min | Lecture, low-disfluency speaker. Only `.m4a` source; exercises the decode-path penalty (bug 9). |
 
 `.env` holds `HF_TOKEN` (mode 600), gitignored, required for pyannote.

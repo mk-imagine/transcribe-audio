@@ -1,0 +1,9 @@
+/* Lecture profile: intended stream, no line numbers, normal margins, sparse
+   anchors. Readable prose with enough timestamps to find a passage in the audio. */
+@page { size: letter; margin: 1in; }
+p.line { display: inline; }            /* sentences flow into a paragraph per turn */
+p.line::after { content: " "; }
+section.turn { margin-bottom: 1em; }
+@media screen {
+  body { max-width: 6.5in; margin: 0 auto; padding: 1in; box-shadow: 0 0 0 1px var(--rule); }
+}
