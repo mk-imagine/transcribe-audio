@@ -124,11 +124,26 @@ class Candidate:
     adjacent_disfluency: bool
     name_like: bool
     masked: bool
+    allowlisted: bool = False
+
+    @property
+    def flagged(self) -> bool:
+        return not self.masked and not self.allowlisted
 
     def as_dict(self) -> Dict[str, Any]:
         return {"i": self.index, "token": self.token, "dissenters": self.dissenters_disagreeing,
                 "adjacent_disfluency": self.adjacent_disfluency, "name_like": self.name_like,
-                "masked": self.masked}
+                "masked": self.masked, "allowlisted": self.allowlisted}
+
+
+def normalise_terms(terms: Sequence[str]) -> Set[str]:
+    """The fluent form of each word of each term, so "Bob Knight" allows both
+    ``bob`` and ``knight`` and matches however the primary punctuated them."""
+    out: Set[str] = set()
+    for term in terms or ():
+        out.update(fluent_view(str(term).split()).tokens)
+    out.discard("<num>")
+    return out
 
 
 def conjunction(
@@ -139,10 +154,19 @@ def conjunction(
     mask_adjacent: bool = True,
     exempt_name_like: bool = True,
     min_dissenters: Optional[int] = None,
+    allow_terms: Sequence[str] = (),
 ) -> Tuple[List[Candidate], Dict[str, Any]]:
     """Every candidate, masked or not, plus counts. Nothing is dropped: a
-    masked candidate is recorded as masked, so a re-run with the mask off is a
-    pure re-annotation (D1)."""
+    masked or allowlisted candidate is recorded as such, so a re-run with
+    different rules is a pure re-annotation (D1).
+
+    ``allow_terms`` are words the user deliberately biased the primary toward
+    (its hotwords). The dissenters cannot spell a rare name any better than
+    they can confirm it, so a correctly biased ``Courchesne`` would otherwise be
+    flagged four times as suspect. It is recorded as a candidate, marked
+    allowlisted, and not flagged.
+    """
+    allow = normalise_terms(allow_terms)
     if not dissenter_tokens:
         raise ValueError("at least one dissenter is required")
     need = len(dissenter_tokens) if min_dissenters is None else min_dissenters
@@ -164,7 +188,8 @@ def conjunction(
         adjacent = (oi - 1) in pv.dropped or (oi + 1) in pv.dropped
         nl = name_like(primary_tokens, oi)
         masked = bool(mask_adjacent and adjacent and not (exempt_name_like and nl))
-        cands.append(Candidate(oi, primary_tokens[oi], n, adjacent, nl, masked))
+        allowed = bool(allow) and any(t in allow for t in fluent_view([primary_tokens[oi]]).tokens)
+        cands.append(Candidate(oi, primary_tokens[oi], n, adjacent, nl, masked, allowed))
 
     stats = {
         "primary_tokens": len(primary_tokens),
@@ -174,9 +199,11 @@ def conjunction(
         "unmatched_per_dissenter": [len(u) for u in per],
         "candidates": len(cands),
         "masked": sum(1 for c in cands if c.masked),
-        "flagged": sum(1 for c in cands if not c.masked),
-        "flagged_pct_of_fluent": round(100 * sum(1 for c in cands if not c.masked) / max(1, len(pv.tokens)), 2),
+        "allowlisted": sum(1 for c in cands if c.allowlisted and not c.masked),
+        "flagged": sum(1 for c in cands if c.flagged),
+        "flagged_pct_of_fluent": round(100 * sum(1 for c in cands if c.flagged) / max(1, len(pv.tokens)), 2),
         "rules": {"expand_pronoun_s": expand_pronoun_s, "mask_adjacent": mask_adjacent,
-                  "exempt_name_like": exempt_name_like, "min_dissenters": need},
+                  "exempt_name_like": exempt_name_like, "min_dissenters": need,
+                  "allow_terms": sorted(allow)},
     }
     return cands, stats

@@ -95,6 +95,19 @@ def _():
     assert conjunction(prim, d, exempt_name_like=False)[1]["flagged"] == 0
 
 
+@check("allowlist: a supplied term is recorded as a candidate but never flagged; phrases split; casing ignored")
+def _():
+    prim = ["and", "Eric", "Courchesne", "and", "Bob", "Knight", "said", "Korshane."]
+    d = [["and", "eric", "korshane", "and", "bob", "night", "said", "korshein"]] * 3
+    cands, st = conjunction(prim, d, allow_terms=["courchesne", "Bob Knight"])
+    by = {c.token: c for c in cands}
+    assert by["Courchesne"].allowlisted and not by["Courchesne"].flagged
+    assert by["Knight"].allowlisted and not by["Knight"].flagged
+    assert by["Korshane."].flagged, "a garble that is not a supplied term is still flagged"
+    assert st["allowlisted"] == 2 and st["flagged"] == 1 and st["rules"]["allow_terms"] == ["bob", "courchesne", "knight"]
+    assert conjunction(prim, d)[1]["flagged"] == 3, "without the allowlist all three are flagged"
+
+
 @check("the conjunction requires at least one dissenter")
 def _():
     try:
@@ -148,6 +161,22 @@ def _():
         ann = out["annotation"]
         assert [d["model_id"] for d in ann["dissenters"]] == ids and all(d["revision"] for d in ann["dissenters"])
         assert "secondary_stream" in ann and ann["secondary_stream"]["mode"] == "intended"
+        # the primary's own hotwords are allowlisted automatically; --no-hotword-allowlist flags them
+        hw = copy.deepcopy(base); hw["asr"]["params"] = dict(hw["asr"]["params"], hotwords=[words[tgt]["text"]])
+        hwp = td / "hw_raw.json"; schema.write(hwp, hw)
+        r4 = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(hwp), "--dissenters", *dpaths],
+                            capture_output=True, text=True)
+        assert r4.returncode == 0, r4.stderr[-300:]
+        o4 = json.loads((td / "hw_annotated.json").read_text())
+        assert "proper_noun_candidate" not in o4["words"][tgt]["flags"], "a hotword must not be flagged"
+        assert any(c["i"] == tgt and c["allowlisted"] for c in o4["annotation"]["primary"]["candidates"])
+        r5 = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(hwp), "--dissenters", *dpaths,
+                             "--no-hotword-allowlist", "-o", str(td / "hw2.json")], capture_output=True, text=True)
+        assert r5.returncode == 0 and "proper_noun_candidate" in json.loads((td / "hw2.json").read_text())["words"][tgt]["flags"]
+        # --allow works for terms the record does not carry
+        r6 = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(prim), "--dissenters", *dpaths,
+                             "--allow", words[tgt]["text"], "-o", str(td / "al.json")], capture_output=True, text=True)
+        assert r6.returncode == 0 and "proper_noun_candidate" not in json.loads((td / "al.json").read_text())["words"][tgt]["flags"]
         # a dissenter with (almost) no tokens is refused: it would vote against everything
         empty = td / "empty_raw.json"; schema.write(empty, _dissenter_doc(base, "just three words", ids[0], 9))
         r0 = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(prim), "--dissenters",
