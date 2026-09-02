@@ -238,11 +238,10 @@ python scripts/rename_recordings.py data/ --apply    # rename
 
 `SEMESTER_START` and `COURSES` at the top of the script are the whole configuration — the
 first day of term and each course's weekdays (with an optional time window for a day that has
-two courses; this semester has none). Names come out as `PSY498-week3.wav`; a course that
-meets twice a week gets the weekday appended, `PSY777-week3-Mon.wav`, since one name per week
-cannot hold two lectures. Two recordings on one day get `-1`, `-2`. Nothing is ever
-overwritten, and a file on a day with no class is skipped and listed. `--start` overrides the
-semester start for a one-off.
+two courses; this semester has none). Names come out as `PSY498-week3-Tue.wav`,
+`PSY777-week3-Mon.wav`, `PSY896-week3-Fri.wav` — code, week, weekday, always. Two recordings
+on one day get `-1`, `-2`. Nothing is ever overwritten, and a file on a day with no class is
+skipped and listed. `--start` overrides the semester start for a one-off.
 
 ## Verification
 

@@ -9,10 +9,10 @@ about what was recorded. The semester calendar does: a recording made on a
 Tuesday in the third week of term is PSY 498, week 3. Edit the two blocks below
 for a new semester.
 
-Naming: PSY<code>-week<N>.<ext>. A course that meets more than once a week gets
-the weekday appended (PSY777-week1-Mon.wav, PSY777-week1-Wed.wav), since one
-name per week cannot hold two lectures. Two recordings on the same day get -1,
--2 in recorder order. Nothing is ever overwritten; a clash is reported and the
+Naming: PSY<code>-week<N>-<Day>.<ext>, e.g. PSY777-week1-Mon.wav,
+PSY498-week1-Tue.wav. The day is always present: a course that meets twice a
+week needs it, and one name shape for every file is easier to read and to
+glob. Two recordings on the same day get -1, -2 in recorder order. Nothing is ever overwritten; a clash is reported and the
 file is left alone. Files on days with no class, before the semester, or not in
 the recorder's format are skipped and listed.
 """
@@ -39,6 +39,7 @@ SEMESTER_START = date(2026, 8, 31)
 COURSES: Dict[str, dict] = {
     "777": {"name": "Multivariate Statistics", "days": ("Mon", "Wed"), "time": None},
     "498": {"name": "Cognitive Neuroscience", "days": ("Tue",), "time": None},
+    "896": {"name": "Lab", "days": ("Fri",), "time": None},
 }
 
 #: Department prefix in the new name.
@@ -90,11 +91,9 @@ def parse_recorder_name(name: str) -> Optional[Tuple[date, int, str]]:
     return d, int(m.group("seq")), m.group("ext")
 
 
-def target_name(code: str, week: int, day: date, ext: str, *, multi_day: bool,
+def target_name(code: str, week: int, day: date, ext: str, *,
                 same_day_index: Optional[int], prefix: str = PREFIX) -> str:
-    name = f"{prefix}{code}-week{week}"
-    if multi_day:
-        name += f"-{WEEKDAYS[day.weekday()]}"
+    name = f"{prefix}{code}-week{week}-{WEEKDAYS[day.weekday()]}"
     if same_day_index is not None:
         name += f"-{same_day_index}"
     return f"{name}.{ext.lower()}"
@@ -136,8 +135,7 @@ def plan(directory: Path, *, start: date = SEMESTER_START, courses: Dict[str, di
         if code is None:
             skipped.append((p, f"{d} ({WEEKDAYS[d.weekday()]}): {why}"))
             continue
-        new = p.with_name(target_name(code, week, d, ext, multi_day=len(courses[code]["days"]) > 1,
-                                      same_day_index=same_day_index[p], prefix=prefix))
+        new = p.with_name(target_name(code, week, d, ext, same_day_index=same_day_index[p], prefix=prefix))
         if new == p:
             continue
         if new.exists():
