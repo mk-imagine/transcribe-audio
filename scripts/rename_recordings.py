@@ -29,7 +29,8 @@ from typing import Dict, List, Optional, Tuple
 # ---------------------------------------------------------------- calendar ---
 
 #: First day of the semester. Week 1 is the seven days starting here.
-SEMESTER_START = date(2026, 8, 31)
+#: Fall 2026: Monday 24 August. (31 August is the Monday of week 2.)
+SEMESTER_START = date(2026, 8, 24)
 
 #: Course code -> the days it meets, and an optional time window.
 #: Times are only consulted when two courses share a day; the recorder's

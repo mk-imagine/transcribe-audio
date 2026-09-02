@@ -31,12 +31,13 @@ def check(name):
 
 @check("the semester starts on a Monday, and weeks are seven-day blocks from it")
 def _():
-    assert rr.SEMESTER_START.weekday() == 0, "2026-08-31 should be a Monday"
-    assert rr.week_number(date(2026, 8, 31)) == 1
-    assert rr.week_number(date(2026, 9, 6)) == 1          # the following Sunday
-    assert rr.week_number(date(2026, 9, 7)) == 2
-    assert rr.week_number(date(2026, 12, 7)) == 15
-    assert rr.week_number(date(2026, 8, 30)) is None      # the day before
+    assert rr.SEMESTER_START == date(2026, 8, 24) and rr.SEMESTER_START.weekday() == 0, "2026-08-24 is a Monday"
+    assert rr.week_number(date(2026, 8, 24)) == 1
+    assert rr.week_number(date(2026, 8, 26)) == 1         # the first recorded lecture, a Wednesday
+    assert rr.week_number(date(2026, 8, 30)) == 1         # the following Sunday
+    assert rr.week_number(date(2026, 8, 31)) == 2         # Monday of week 2
+    assert rr.week_number(date(2026, 12, 7)) == 16
+    assert rr.week_number(date(2026, 8, 23)) is None      # the day before
 
 
 @check("courses map to weekdays; a day with no class is refused with a reason")
@@ -88,31 +89,33 @@ def _seed(td, names):
 def _():
     with tempfile.TemporaryDirectory() as d:
         td = Path(d)
-        _seed(td, ["260831_0001.wav", "260901_0002.wav", "260902_0003.wav", "260903_0004.wav", "260904_0007.wav",
-                   "260908_0005.wav", "260908_0006.wav", "260829_0001.wav", "geisler.wav", "notes.txt"])
+        _seed(td, ["260826_0001.wav", "260831_0001.wav", "260901_0002.wav", "260902_0003.wav", "260903_0004.wav",
+                   "260904_0007.wav", "260908_0005.wav", "260908_0006.wav", "260820_0001.wav", "geisler.wav", "notes.txt"])
         renames, skipped = rr.plan(td)
         got = {o.name: n.name for o, n in renames}
-        assert got == {"260831_0001.wav": "PSY777-week1-Mon.wav", "260901_0002.wav": "PSY498-week1-Tue.wav",
-                       "260902_0003.wav": "PSY777-week1-Wed.wav", "260904_0007.wav": "PSY896-week1-Fri.wav",
-                       "260908_0005.wav": "PSY498-week2-Tue-1.wav", "260908_0006.wav": "PSY498-week2-Tue-2.wav"}, got
+        assert got == {"260826_0001.wav": "PSY777-week1-Wed.wav",
+                       "260831_0001.wav": "PSY777-week2-Mon.wav", "260901_0002.wav": "PSY498-week2-Tue.wav",
+                       "260902_0003.wav": "PSY777-week2-Wed.wav", "260904_0007.wav": "PSY896-week2-Fri.wav",
+                       "260908_0005.wav": "PSY498-week3-Tue-1.wav", "260908_0006.wav": "PSY498-week3-Tue-2.wav"}, got
         why = {p.name: w for p, w in skipped}
         assert "no class on Thu" in why["260903_0004.wav"]
-        assert "before the semester" in why["260829_0001.wav"]
+        assert "before the semester" in why["260820_0001.wav"]
         assert "not in YYMMDD" in why["geisler.wav"] and "not in YYMMDD" in why["notes.txt"]
         assert sorted(p.name for p in td.iterdir()) == sorted(
-            ["260831_0001.wav", "260901_0002.wav", "260902_0003.wav", "260903_0004.wav", "260904_0007.wav",
-             "260908_0005.wav", "260908_0006.wav", "260829_0001.wav", "geisler.wav", "notes.txt"]), "plan() must not touch files"
+            ["260826_0001.wav", "260831_0001.wav", "260901_0002.wav", "260902_0003.wav", "260903_0004.wav",
+             "260904_0007.wav", "260908_0005.wav", "260908_0006.wav", "260820_0001.wav", "geisler.wav", "notes.txt"]), \
+            "plan() must not touch files"
 
 
 @check("never overwrite: an existing target or a duplicate claim is skipped, not clobbered")
 def _():
     with tempfile.TemporaryDirectory() as d:
         td = Path(d)
-        _seed(td, ["260901_0002.wav", "PSY498-week1-Tue.wav"])
+        _seed(td, ["260901_0002.wav", "PSY498-week2-Tue.wav"])
         renames, skipped = rr.plan(td)
         why = {p.name: w for p, w in skipped}
         assert renames == [] and "already exists" in why["260901_0002.wav"], why
-        assert (td / "PSY498-week1-Tue.wav").read_bytes() == b"RIFF", "the existing file is untouched"
+        assert (td / "PSY498-week2-Tue.wav").read_bytes() == b"RIFF", "the existing file is untouched"
 
 
 @check("the CLI: dry run by default, --apply renames, exit codes")
@@ -125,7 +128,7 @@ def _():
         r = subprocess.run([sys.executable, str(ROOT / "scripts" / "rename_recordings.py"), str(td), "--apply"],
                            capture_output=True, text=True)
         assert r.returncode == 0 and "renamed 2" in r.stdout, r.stdout
-        assert sorted(p.name for p in td.iterdir()) == ["PSY498-week1-Tue.wav", "PSY777-week1-Wed.wav"]
+        assert sorted(p.name for p in td.iterdir()) == ["PSY498-week2-Tue.wav", "PSY777-week2-Wed.wav"]
         r = subprocess.run([sys.executable, str(ROOT / "scripts" / "rename_recordings.py"), str(td), "--apply"],
                            capture_output=True, text=True)
         assert "nothing to rename" in r.stdout, "a second run must be a no-op"
@@ -138,9 +141,9 @@ def _():
 def _():
     with tempfile.TemporaryDirectory() as d:
         td = Path(d); _seed(td, ["260901_0002.wav"])
-        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "rename_recordings.py"), str(td), "--start", "2026-08-24"],
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "rename_recordings.py"), str(td), "--start", "2026-08-17"],
                            capture_output=True, text=True)
-        assert "PSY498-week2-Tue.wav" in r.stdout, r.stdout
+        assert "PSY498-week3-Tue.wav" in r.stdout, r.stdout
 
 
 def main():
