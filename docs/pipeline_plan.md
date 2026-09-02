@@ -178,11 +178,50 @@ Source: HuggingFace model card. Released **2026-04-28**. **Apache 2.0**.
   maintain the speaker numbering in SAA mode" across segments, which means **speaker numbers
   restart per chunk without it** — they are ordinals by first appearance, not identities.
 - Speaker attribution mode: emits `[Speaker 1]:` / `[Speaker 2]:` tags, numbered by first appearance
-- **The plus variant does not produce punctuation or capitalisation** (unlike base 4.1-2b)
-- No verbatim or disfluency claim anywhere on the card
+- ~~The plus variant does not produce punctuation or capitalisation~~ **Wrong — it depends
+  on the mode** (measured 2026-09-01). ASR and SAA output is punctuated and capitalised
+  (`"Absolutely. Yeah. In fact, you're alluding to…"`); **timestamp mode is lowercase and
+  unpunctuated** (`um [T:84] including [T:130] bob [T:160] knight`). Since the timestamped
+  words are what the record carries, stage 2's punctuation rule gets little from this model
+  and the silence tokens carry the segmentation instead.
+- No verbatim or disfluency claim anywhere on the card — but **timestamp mode emits some
+  fillers** where ASR mode emits none: 5 `uh`/`um` on the 45:00 reference window (CrisperWhisper
+  verbatim: 10; Granite ASR/SAA mode: 0). Every word needing a tag seems to make skipping one
+  harder. Not enough to revisit D4; enough to note.
 - ~2 B params ≈ 4 GB bf16; snapshot `1454e6e1` cached on POLARIS
-- **OPEN:** whether timestamp mode and speaker-attribution mode can be combined in one prompt.
-  Undocumented, and this project needs both. Phase 0 question 2 — spike submitted 2026-09-01.
+- **Phase 0 question 2 — answered 2026-09-01: the modes do not combine.** Two fusions of the
+  documented prompts, on the reference window and on a multi-speaker window where SAA alone
+  found two speakers and three turns, both produced timestamp-mode output with a single
+  vestigial `[Speaker 1]:` at the start and no attribution. The adapter therefore runs two
+  passes per window and aligns them (§8, Phase 3).
+
+#### Phase 3 spike (2026-09-01, A100, `audio-transcribe-tf5`, two 90 s windows)
+
+| window | mode | gen | tokens | speaker tags | `[T:N]` tags | silences | unwrap monotonic | last end |
+|---|---|---|---|---|---|---|---|---|
+| geisler 45:00 | ASR | 4.4 s | 212 | — | — | — | — | — |
+| geisler 45:00 | SAA | 4.0 s | 217 | 1 (`Speaker 1`) | — | — | — | — |
+| geisler 45:00 | **TS** | 22.7 s | 1270 | — | **206** | **42** | **yes** | 85.05 s |
+| geisler 45:00 | combo ×2 | 22 s | ~1260 | 1 (vestigial) | ~204 | ~40 | yes | ~85 s |
+| proseminar 11:30 | SAA | 6.0 s | 335 | **3** (`Speaker 1, 2, 1`) | — | — | — | — |
+| proseminar 11:30 | **TS** | 33.6 s | 1906 | — | **313** | **45** | **yes** | 88.25 s |
+| proseminar 11:30 | combo ×2 | 34 s | ~1918 | **1** (vestigial) | ~314 | ~46 | yes | ~88 s |
+
+Timestamp mode is ~4× realtime — 1,270 tokens for 90 s of audio, against ~210 for ASR — so an
+80-minute recording is roughly twenty minutes of A100. No untagged trailing text on either
+window; the largest inter-token gap was 3.9 s.
+
+**Speaker numbering across chunks.** The card says numbers are ordinals by first appearance and
+names incremental decoding as the way to keep them consistent. The spike confirmed the
+mechanism works (a `prefix_text` continuation carried on without re-transcribing) but the
+second half-window happened to contain one speaker, so relabelling was not directly observed.
+The adapter assumes the card is right and namespaces labels per window.
+
+**The name again.** Granite is a different lineage from CrisperWhisper and garbled `Courchesne`
+the same way — `korshane` in timestamp mode; `Korschane`, `Korshezeni`, `Korsheane` in one ASR
+sentence. Independence of lineage does not buy independence of error on a name neither model
+has seen; §7b's dissenters would all agree it is a garble, which is the point, but none would
+supply the spelling.
 
 ### Measured behaviour (2026-08-31, real audio)
 
@@ -925,7 +964,7 @@ which arrives in Phase 3.
 
 | Item | Status |
 |---|---|
-| **Granite timestamp + speaker mode combination** | Undocumented. Phase 0 question 2. |
+| **Granite timestamp + speaker mode combination** | **Resolved 2026-09-01: they do not combine.** A fused prompt yields timestamp output with no attribution (§3). The adapter runs two passes per window and aligns them. |
 | **Coding margin layout** | Right-hand column vs. double-spaced. Ask the student coders. |
 | **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
 | **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (interview) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
