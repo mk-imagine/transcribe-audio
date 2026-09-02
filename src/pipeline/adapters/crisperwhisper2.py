@@ -155,8 +155,17 @@ class CrisperWhisper2Adapter(Adapter):
         )
 
         # The package signals "hotwords are untrained on this checkpoint" with a
-        # UserWarning. Warnings go to stderr and vanish; capture it so it reaches
-        # the log and the output record instead.
+        # UserWarning, and "chunk N produced empty output" through its logger.
+        # Both would otherwise vanish into a job log; both go into the record.
+        logged: List[str] = []
+
+        class _Collect(logging.Handler):
+            def emit(self, record):
+                logged.append(record.getMessage())
+
+        collector = _Collect(level=logging.WARNING)
+        pkg_logger = logging.getLogger("crisperwhisper")
+        pkg_logger.addHandler(collector)
         with warnings.catch_warnings(record=True) as caught:
             warnings.simplefilter("always")
             try:
@@ -167,6 +176,7 @@ class CrisperWhisper2Adapter(Adapter):
                 else:
                     primary, secondary = self._transcribe_one(audio_path, self.mode), None
             except Exception as exc:  # noqa: BLE001 - recorded, never swallowed
+                pkg_logger.removeHandler(collector)
                 logger.error("CrisperWhisper failed on the whole file: %s", exc)
                 return AdapterResult(
                     errors=[ErrorRange(0.0, duration, f"{type(exc).__name__}: {exc}")],
@@ -174,11 +184,13 @@ class CrisperWhisper2Adapter(Adapter):
                     backend=self._resolved_backend,
                 )
 
+        pkg_logger.removeHandler(collector)
         model_warnings = []
         for w in caught:
             text = f"{w.category.__name__}: {w.message}"
             model_warnings.append(text)
             logger.warning("crisperwhisper: %s", text)
+        model_warnings += [f"log: {m}" for m in logged]
         if model_warnings:
             params["model_warnings"] = model_warnings
 
