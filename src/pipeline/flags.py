@@ -36,6 +36,11 @@ def tag(text: str) -> Tuple[str, ...]:
     token = (text or "").strip()
     if not token:
         return ()
+    # Granite transcribes silences as a bare "_" with their own end timestamp.
+    # Kept in the record -- it is what makes deriving the next word's start
+    # sound -- and flagged so a renderer can drop it from the text.
+    if token == "_":
+        return ("silence",)
 
     m = _BRACKETED.match(token)
     if m:

@@ -231,7 +231,7 @@ def transcribe(args) -> Dict[str, Any]:
         source=_source_block(args, audio_path, duration),
         run=provenance.run_block(device),
         asr=asr,
-        diarization=diarizer.provenance() if diarizer is not None else None,
+        diarization=diarizer.provenance() if diarizer is not None else _adapter_diarization(result, spec),
         words=result.words,
         speaker_turns=speaker_turns,
         errors=[e.as_dict() for e in result.errors],
@@ -287,6 +287,15 @@ def _hhmmss(value: str) -> Optional[float]:
     for part in parts:
         seconds = seconds * 60 + part
     return seconds
+
+
+def _adapter_diarization(result: AdapterResult, spec: ModelSpec) -> Optional[Dict[str, Any]]:
+    """Provenance for speaker turns the model produced itself (speaker_labels=True)."""
+    if not result.diarization:
+        return None
+    block = dict(result.diarization)
+    block.update(provenance.hf_revision(spec.model_id))
+    return block
 
 
 def _model_warnings(result: AdapterResult) -> List[str]:

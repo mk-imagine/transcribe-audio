@@ -113,6 +113,10 @@ float32 on CPU, because ct2 refuses float16 on CPU. The first run at a new compu
 converts the CT2 model (a minute or two; needs torch+transformers, i.e. `cw2native`) and caches
 it under `~/.cache/crisperwhisper/`.
 
+Granite 4.1-plus runs in `audio-transcribe-tf5` (`--model ibm-granite/granite-speech-4.1-2b-plus`,
+no `--no_diarize` needed: it attributes speakers itself). Two passes per 200 s window, about
+2.2× realtime on the A100.
+
 Add `--dual_stream` for both renderings — verbatim *and* intended, each with word timestamps,
 from one batched pass on the ct2 backend (~11% more inference than one stream, against ~100%
 for a second pass). It writes a second preview file per stream.

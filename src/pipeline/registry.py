@@ -100,18 +100,17 @@ for _w in ("tiny", "base", "small", "medium", "large", "large-v2", "large-v3",
     _register(_spec(f"openai/whisper-{_w}", _WHISPER, _WHISPER_CAPS,
                     defaults={"granularity": "word"}))
 
-# --- Planned, not yet implemented ------------------------------------------
-# Registered so a Phase 3 model id fails with a sentence instead of a NameError,
-# which is what the factory did after its adapter class was deleted.
-_register(ModelSpec(
-    model_id="ibm-granite/granite-speech-4.1-2b-plus",
-    unsupported=(
-        "Adapter not implemented yet (Phase 3). Declared shape: word_timestamps="
-        "'end_only' (centisecond [T:N] tags marking word ends), silence_tokens=True "
-        "(silences transcribed as '_'), speaker_labels=True, longform="
-        "'needs_chunking', verbatim='no'."
-    ),
-))
+# --- Granite Speech 4.1-2b-plus (D5) ---------------------------------------
+# The second adapter: exercises end_only timestamps, silence tokens and native
+# speaker labels -- the paths CrisperWhisper does not.
+_GRANITE = "pipeline.adapters.granite41plus:Granite41PlusAdapter"
+_GRANITE_CAPS = Capabilities(
+    word_timestamps="end_only", verbatim="no", speaker_labels=True,
+    silence_tokens=True, longform="needs_chunking", confidence=False, hotwords="trained",
+)
+_register(_spec("ibm-granite/granite-speech-4.1-2b-plus", _GRANITE, _GRANITE_CAPS,
+                notes="Two passes per 200 s window (timestamps, then speaker attribution); "
+                      "the modes do not combine in one prompt. Speaker labels are per-window."))
 
 # --- Mocks: no weights, no ML dependencies ---------------------------------
 _MOCKS = {

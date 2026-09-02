@@ -70,14 +70,16 @@ def _():
         raise AssertionError("the MLX checkpoint resolved")
 
 
-@check("a Granite id fails with a sentence, not a NameError")
+@check("Granite 4.1-plus resolves to its adapter with the end_only / silence / speaker shape")
 def _():
-    try:
-        resolve("ibm-granite/granite-speech-4.1-2b-plus")
-    except UnsupportedModelError as exc:
-        assert "Phase 3" in str(exc)
-    else:
-        raise AssertionError("granite resolved but has no adapter")
+    spec = resolve("ibm-granite/granite-speech-4.1-2b-plus")
+    cls = load_adapter_class(spec)
+    c = cls.capabilities
+    assert (c.word_timestamps, c.silence_tokens, c.speaker_labels, c.longform, c.verbatim) == \
+        ("end_only", True, True, "needs_chunking", "no"), c
+    p = plan_for(c, diarize_requested=True)
+    assert p.derive_starts and p.chunking and not p.needs_diarizer and not p.warnings, p
+    assert not plan_for(c, mode="verbatim").ok, "verbatim must be refused"
 
 
 @check("an unknown id is refused with the supported list, never guessed at")
@@ -441,6 +443,70 @@ def _():
     assert _speaker_at(4.2, turns) == "SPEAKER_00"   # in the gap, nearer the first
     assert _speaker_at(4.9, turns) == "SPEAKER_01"   # in the gap, nearer the second
     assert _speaker_at(0.0, []) is None
+
+
+# ---------------------------------------------------------- granite parsing --
+
+@check("Granite timestamps unwrap across the 10-second rollover, per the card's algorithm")
+def _():
+    from pipeline.adapters.granite41plus import unwrap_timestamps
+    # 9.8s; then 030 reads lower -> one rollover, 10.3s; 120 -> 11.2s; then 050 reads
+    # lower again -> second rollover, 20.5s; 150 -> 21.5s. A rollover happens only
+    # when a reading drops below the running end, never merely because ten
+    # seconds of audio have passed.
+    words, mono, trailing = unwrap_timestamps(
+        "hello [T:980] world [T:030] _ [T:120] again [T:050] more [T:150]")
+    assert [(w.text, w.end) for w in words] == \
+        [("hello", 9.8), ("world", 10.3), ("_", 11.2), ("again", 20.5), ("more", 21.5)], \
+        [(w.text, w.end) for w in words]
+    assert mono and trailing == ""
+    assert words[2].flags == ("silence",) and words[0].flags == ()
+    assert all(w.start is None for w in words), "starts are derived by the orchestrator, not read"
+
+
+@check("Granite timestamps: a plain centisecond reading would be wrong after ten seconds")
+def _():
+    from pipeline.adapters.granite41plus import unwrap_timestamps
+    words, _, _ = unwrap_timestamps("a [T:995] b [T:005] c [T:010]")
+    assert [w.end for w in words] == [9.95, 10.05, 10.1], [w.end for w in words]
+
+
+@check("Granite timestamps: untagged trailing text is reported, not dropped silently")
+def _():
+    from pipeline.adapters.granite41plus import unwrap_timestamps
+    words, _, trailing = unwrap_timestamps("one [T:050] two [T:100] three four")
+    assert [w.text for w in words] == ["one", "two"] and trailing == "three four"
+
+
+@check("Granite speaker tags parse in order, with untagged lead-in kept")
+def _():
+    from pipeline.adapters.granite41plus import parse_speakers
+    segs = parse_speakers("[Speaker 1]: hello there [Speaker 2]: hi [Speaker 1]: ok")
+    assert segs == [("Speaker 1", "hello there"), ("Speaker 2", "hi"), ("Speaker 1", "ok")], segs
+    assert parse_speakers("lead in [Speaker 1]: x") == [(None, "lead in"), ("Speaker 1", "x")]
+    assert parse_speakers("no tags at all") == [(None, "no tags at all")]
+
+
+@check("Granite speaker alignment: TS words take the SAA speaker; silences and unmatched inherit")
+def _():
+    from pipeline.adapters.granite41plus import align_speakers, turns_from_labels
+    ws = [Word("_", None, 0.3, flags=("silence",)), Word("hello", None, 0.6), Word("there", None, 0.9),
+          Word("_", None, 1.4, flags=("silence",)), Word("hi", None, 1.7), Word("um", None, 1.9),
+          Word("ok", None, 2.2)]
+    segs = [("Speaker 1", "Hello, there."), ("Speaker 2", "Hi ok")]     # SAA drops the "um"
+    labels = align_speakers(ws, segs)
+    assert labels == ["Speaker 1", "Speaker 1", "Speaker 1", "Speaker 1", "Speaker 2", "Speaker 2", "Speaker 2"], labels
+    turns = turns_from_labels(ws, labels)
+    assert turns == [{"start": 0.3, "end": 0.9, "speaker": "Speaker 1"},
+                     {"start": 1.4, "end": 2.2, "speaker": "Speaker 2"}], turns
+    assert align_speakers(ws, [(None, "hello there hi um ok")]) == ["Speaker 1"] * 7
+    assert align_speakers(ws, []) == ["Speaker 1"] * 7
+
+
+@check("a silence token is flagged 'silence' by the tagger")
+def _():
+    assert flags.tag("_") == ("silence",)
+    assert flags.tag("word_") == ()
 
 
 # ---------------------------------------------------------------- fixture --

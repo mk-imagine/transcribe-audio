@@ -150,18 +150,79 @@ Source: HuggingFace model card. Released **2026-04-28**. **Apache 2.0**.
 
 - Word-level timestamps: `[T:N]` tags after each word, N in **centiseconds**, marking the
   **end** of the word. No start times.
+- **N is modulo 1000 — the tag rolls over every 10 seconds.** (Re-read 2026-09-01; the
+  entry above had omitted this.) "To reduce the amount of generated tokens, only the last three
+  digits are provided": `N = round(t·100) mod 1000`, and `t = N/100 + 10R` with R the rollover
+  count. The card's unwrap is `while end + offset < last_end: offset += 10`. An adapter that
+  reads N as plain centiseconds is correct for exactly the first ten seconds of every window.
 - **Silences are transcribed as `_` with their own end timestamp.** This is why `end_only` is
   usable: with explicit pause tokens, `word_start = previous_token_end` is correct and pause
   durations are recoverable.
-- Timestamp-mode prompt: `<|audio|> Timestamps: Transcribe the speech. After each word, add a
-  timestamp tag showing the end time in centiseconds, e.g. hello [T:45] world [T:82]`
+- **Length limits:** "works well with audio segments up to 9 minutes for ASR and SAA, and up
+  to 3.5 minutes for timestamps." So `longform="needs_chunking"` with a **≤210 s window in
+  timestamp mode** — smaller than the 300 s `SEGMENT_SIZE` the chunker defaults to.
+- Exact prompts (the card's; verbatim matters for a prompt-steered model):
+  - ASR: `<|audio|> can you transcribe the speech into a written format?`
+  - SAA: `<|audio|> Speaker attribution: Transcribe and denote who is speaking by adding
+    [Speaker 1]: and [Speaker 2]: tags before speaker turns.`
+  - TS: `<|audio|> Timestamps: Transcribe the speech. After each word, add a timestamp tag
+    showing the end time in centiseconds, e.g. hello [T:45] world [T:82]` — with
+    `max_new_tokens=10000`
+  - KWB: append `Keywords: …` to any prompt; terms absent from the audio are tolerated.
+- Invocation: `AutoProcessor` + `AutoModelForSpeechSeq2Seq`, bf16, a **fixed** system prompt
+  (`Today's Date: December 19, 2024` — the card's, not the wall clock), chat template with
+  `add_generation_prompt=True`, `generate(do_sample=False, num_beams=1)`, decode only the new
+  tokens. Native in `transformers>=5.8`.
+- **Incremental decoding:** `apply_chat_template(..., prefix_text=previous_transcript)` — the
+  template emits the prefix right after the generation prompt (confirmed in the snapshot's
+  `chat_template.jinja`), and the *audio accumulates* too. The card names it as the way "to
+  maintain the speaker numbering in SAA mode" across segments, which means **speaker numbers
+  restart per chunk without it** — they are ordinals by first appearance, not identities.
 - Speaker attribution mode: emits `[Speaker 1]:` / `[Speaker 2]:` tags, numbered by first appearance
-- Other modes: plain ASR, incremental decoding, keyword-list biasing
-- **The plus variant does not produce punctuation or capitalisation** (unlike base 4.1-2b)
-- No verbatim or disfluency claim anywhere on the card
-- ~2 B params ≈ 4 GB bf16
-- **OPEN:** whether timestamp mode and speaker-attribution mode can be combined in one prompt.
-  Undocumented, and this project needs both. Phase 0 question 2.
+- ~~The plus variant does not produce punctuation or capitalisation~~ **Wrong — it depends
+  on the mode** (measured 2026-09-01). ASR and SAA output is punctuated and capitalised
+  (`"Absolutely. Yeah. In fact, you're alluding to…"`); **timestamp mode is lowercase and
+  unpunctuated** (`um [T:84] including [T:130] bob [T:160] knight`). Since the timestamped
+  words are what the record carries, stage 2's punctuation rule gets little from this model
+  and the silence tokens carry the segmentation instead.
+- No verbatim or disfluency claim anywhere on the card — but **timestamp mode emits some
+  fillers** where ASR mode emits none: 5 `uh`/`um` on the 45:00 reference window (CrisperWhisper
+  verbatim: 10; Granite ASR/SAA mode: 0). Every word needing a tag seems to make skipping one
+  harder. Not enough to revisit D4; enough to note.
+- ~2 B params ≈ 4 GB bf16; snapshot `1454e6e1` cached on POLARIS
+- **Phase 0 question 2 — answered 2026-09-01: the modes do not combine.** Two fusions of the
+  documented prompts, on the reference window and on a multi-speaker window where SAA alone
+  found two speakers and three turns, both produced timestamp-mode output with a single
+  vestigial `[Speaker 1]:` at the start and no attribution. The adapter therefore runs two
+  passes per window and aligns them (§8, Phase 3).
+
+#### Phase 3 spike (2026-09-01, A100, `audio-transcribe-tf5`, two 90 s windows)
+
+| window | mode | gen | tokens | speaker tags | `[T:N]` tags | silences | unwrap monotonic | last end |
+|---|---|---|---|---|---|---|---|---|
+| geisler 45:00 | ASR | 4.4 s | 212 | — | — | — | — | — |
+| geisler 45:00 | SAA | 4.0 s | 217 | 1 (`Speaker 1`) | — | — | — | — |
+| geisler 45:00 | **TS** | 22.7 s | 1270 | — | **206** | **42** | **yes** | 85.05 s |
+| geisler 45:00 | combo ×2 | 22 s | ~1260 | 1 (vestigial) | ~204 | ~40 | yes | ~85 s |
+| proseminar 11:30 | SAA | 6.0 s | 335 | **3** (`Speaker 1, 2, 1`) | — | — | — | — |
+| proseminar 11:30 | **TS** | 33.6 s | 1906 | — | **313** | **45** | **yes** | 88.25 s |
+| proseminar 11:30 | combo ×2 | 34 s | ~1918 | **1** (vestigial) | ~314 | ~46 | yes | ~88 s |
+
+Timestamp mode is ~4× realtime — 1,270 tokens for 90 s of audio, against ~210 for ASR — so an
+80-minute recording is roughly twenty minutes of A100. No untagged trailing text on either
+window; the largest inter-token gap was 3.9 s.
+
+**Speaker numbering across chunks.** The card says numbers are ordinals by first appearance and
+names incremental decoding as the way to keep them consistent. The spike confirmed the
+mechanism works (a `prefix_text` continuation carried on without re-transcribing) but the
+second half-window happened to contain one speaker, so relabelling was not directly observed.
+The adapter assumes the card is right and namespaces labels per window.
+
+**The name again.** Granite is a different lineage from CrisperWhisper and garbled `Courchesne`
+the same way — `korshane` in timestamp mode; `Korschane`, `Korshezeni`, `Korsheane` in one ASR
+sentence. Independence of lineage does not buy independence of error on a name neither model
+has seen; §7b's dissenters would all agree it is a garble, which is the point, but none would
+supply the spelling.
 
 ### Measured behaviour (2026-08-31, real audio)
 
@@ -361,7 +422,7 @@ src/
       [x] crisperwhisper2.py
       [x] whisper.py           # generic openai/whisper-* only
       [x] mock.py              # six capability-declaring fakes, no weights
-      [ ] granite41plus.py     # Phase 3
+      [x] granite41plus.py     # two passes per 200 s window, aligned (Phase 3)
     [x] chunking.py            # fixed-window segmentation + retry by subdivision
     [x] flags.py               # filled_pause / vocalization / partial_word tagging
     [x] diarize.py             # pyannote wrapper
@@ -915,6 +976,37 @@ which is where `repetition`/`repair` tagging goes when a detector is chosen.
 Granite 4.1-plus. Exercises `end_only` timestamps, silence tokens and native speaker labels,
 proving the contract holds rather than having been written around one model.
 
+**Done (2026-09-01).** `src/pipeline/adapters/granite41plus.py`, registered; verified through
+the real pipeline on the A100 (`audio-transcribe-tf5`, `251211_0009.wav`):
+
+| | A — 11:30–13:00, one window | B — 11:00–16:00, two windows |
+|---|---|---|
+| tokens (spoken + silence) | 268 + 45 | 936 + 148 |
+| every `start` = previous token's `end` | yes | yes |
+| ends monotonic after unwrap | yes | yes |
+| turns / labels | 3 — `Speaker 1`, `Speaker 2` | 6 — `w1:Speaker 1/2`, `w2:Speaker 1/2` |
+| `diarization` block | the model's own SAA pass, `source: asr` | same |
+| words carrying a speaker | 0 — assigned in stage 2 (D3) | 0 |
+| realtime factor, both passes | 2.2 | 2.2 |
+| exit / `validate()` | 0 / clean | 0 / clean |
+
+The plan line the orchestrator logged is the whole point of the phase:
+`chunking=True derive_starts=True forced_alignment=False diarizer=False timing=derived` —
+three paths CrisperWhisper never takes, dispatched from the registry declaration alone.
+
+What the spike forced (§3): the timestamp and speaker modes do not combine, so the adapter
+runs **two passes per 200 s window** and aligns them by token sequence; the SAA turns land in
+`speaker_turns`, where stage 2 treats them like pyannote's. Speaker numbers restart per
+window, so multi-window labels are namespaced and the record says so in `warnings`; the
+render-time speaker map merges them. At 2.2× realtime an 80-minute file is ~36 minutes of
+A100 — fine for a contract-proving adapter; CrisperWhisper remains the production model (D4).
+
+**Follow-ups, not blockers:** the stage-2 renderer must drop `silence` tokens before
+segmentation (they would bridge every pause the pause rule looks for) — it lands once the
+renderer PR is merged. And a sliding-window variant of the card's incremental decoding, with
+`prefix_text` carrying the previous window's tail, might keep speaker numbers consistent
+across windows; unverified, a spike item.
+
 ### Phase 4 — Benchmark *(only if needed)*
 
 Only if Phase 0 leaves the model choice genuinely ambiguous. If so, measure **per-category
@@ -979,7 +1071,7 @@ which arrives in Phase 3.
 
 | Item | Status |
 |---|---|
-| **Granite timestamp + speaker mode combination** | Undocumented. Phase 0 question 2. |
+| **Granite timestamp + speaker mode combination** | **Resolved 2026-09-01: they do not combine.** A fused prompt yields timestamp output with no attribution (§3). The adapter runs two passes per window and aligns them. |
 | **Coding margin layout** | **Resolved 2026-09-01: right-hand column (D23).** Reopens the moment a coder asks for something else. |
 | **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
 | **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (proseminar) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
