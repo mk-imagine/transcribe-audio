@@ -941,9 +941,24 @@ ARK fixed, Parakeet correct):
 | window | fluent tokens | flagged | real | residue |
 |---|---|---|---|---|
 | lecture 45:00, three dissenters, pipeline | 165 | **4 (2.4%)** | **3** — `Korshesney` ×2, `Brooklyn.` | 1 — `Okay.` |
-| proseminar 11:30, three dissenters, spike (its Parakeet file was the correct one) | 264 | **3 (1.1%)** with both refinements | 0 | 3 — `and`, `You're`, `be` |
+| proseminar 11:30, three dissenters, spike (its Parakeet file was the correct one) | 271 | **2 (0.7%)** with both refinements | 0 | 2 — `and`, `be` |
 
-Residue over both: **4 of 429 fluent tokens, 0.9%.** Recall on the probe name: **two of its
+Residue over both: **3 of 436 fluent tokens, 0.7%** (through `pipeline/fluent.py` as shipped; an
+earlier ad-hoc re-analysis said 4 of 429).
+
+**What the mask buys, on the same records:**
+
+| | flagged / real / residue |
+|---|---|
+| lecture 45:00, mask on **or** off | 4 / 3 / `Okay.` — no candidate sits beside a marker, so the mask is inert |
+| proseminar 11:30, mask **on** | 2 / 0 / `and`, `be` |
+| proseminar 11:30, mask **off** | 4 / 0 / `and`, `a`, `Like`, `be` |
+
+Without the mask, residue over both windows is 5 of 436 (**1.1%** against 0.7%) and nothing
+real is gained. Scaled to speech at ~180 wpm, the mask removes roughly seven false `[NAME?]`
+marks per ten minutes — each a function word beside a filler, which a coder dismisses at a
+glance — and on this data hides nothing. Its only possible cost is the lowercase-garble-beside-
+marker case, which has not yet occurred. Default on; `--no-mask-adjacent` to compare. Recall on the probe name: **two of its
 four occurrences, plus `Brooklyn.`** The two `Korshane` occurrences are unflagged because
 **Parakeet independently produced `Korshane`** — it missed only 4 of 165 tokens on this window
 — and the conjunction withholds a flag when any dissenter agrees. That is the rule working as
