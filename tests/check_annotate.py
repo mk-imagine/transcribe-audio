@@ -181,6 +181,24 @@ def _():
     assert disfluency.tag(_toks("I", "went", "we", "drove")).flags == {}
 
 
+@check("the exclusions: a comma list, a capitalised restart, and a restatement across a period are not events")
+def _():
+    assert disfluency.tag(_toks("about", "ourselves,", "about", "the", "future,", "about", "the", "world.")).flags == {}
+    assert disfluency.tag(_toks("illness", "and", "motivation", "And", "then")).flags == {}
+    assert disfluency.tag(_toks("call", "pathogenic.", "Pathogenic", "means")).flags == {}
+    assert disfluency.tag(_toks("saying", "this,", "and", "this", "is")).flags == {}
+    assert disfluency.tag(_toks("I", "went", "I", "drove")).flags == {0: ["repair"], 1: ["repair"]}
+
+
+@check("shapes are selectable: without 'substitution', only partials and restatements are tagged")
+def _():
+    toks = _toks("I", "went", "I", "drove", ("de-", "partial_word"), "developmental", "the", "the")
+    full = disfluency.tag(toks).counts()
+    assert full == {"repair": 2, "repair:completed_partial": 1, "repair:substitution": 1, "repetition": 1, "repetition:restatement": 1}, full
+    cons = disfluency.tag(toks, ("restatement", "completed_partial")).counts()
+    assert "repair:substitution" not in cons and cons["repair"] == 1 and cons["repetition"] == 1
+
+
 @check("disfluency tags on the fixture: repetitions exist, every tagged copy equals its restart")
 def _():
     base = json.loads(FIXTURE.read_text())

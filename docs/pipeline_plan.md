@@ -1167,9 +1167,17 @@ or a 2–3 word span restarted with its first word kept and one word changed (`I
 is a **repair**. The *abandoned* material is tagged and the restart stands, so one flag is one
 event and a per-speaker rate is a count. The text is never touched. Their value is consistency
 and counting, not reading — the verbatim text already shows `the the` — which is why they are
-opt-in and why the renderer marks only a reparandum, faintly, in HTML. The BERT tagger the
-earlier draft of this paragraph named is not needed for these shapes; it remains an option for
-editing terms and subtler repairs if a coding scheme ever wants them.
+opt-in and why the renderer marks only a reparandum, faintly, in HTML.
+
+**Measured on the fixture** (10 min, 1,969 words), after reading every event: 19 restatements,
+all plausible once two new-sentence-with-the-same-word cases were excluded; 5 completed
+partials, all right; **15 substitutions, of which about 11 are real.** The residue is two shapes
+a rule cannot separate from a repair without semantics — a list without commas (`a niece or
+nephew or something`) and a shared infinitive marker before a verb and a preposition (`to adapt
+to your environment`). Substitution is therefore its own shape in the counts and is switchable
+(`--repair-shapes restatement,completed_partial` for a conservative tagging). The BERT tagger the
+earlier draft of this paragraph named is not needed for the two tight shapes; it remains the
+option for the loose one and for editing terms, if a coding scheme ever wants them.
 
 ### Phase 4 — Benchmark *(only if needed)*
 

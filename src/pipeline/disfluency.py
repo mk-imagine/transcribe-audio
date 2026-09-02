@@ -97,9 +97,14 @@ class Result:
         return dict(sorted(out.items()))
 
 
-def tag(tokens: Sequence[Tuple[str, Sequence[str]]]) -> Result:
+SHAPES = ("restatement", "completed_partial", "substitution")
+
+
+def tag(tokens: Sequence[Tuple[str, Sequence[str]]], shapes: Sequence[str] = SHAPES) -> Result:
     """``tokens`` is ``[(text, flags), ...]`` for the spoken tokens in order.
-    Returns the events and, per position, the flags to add."""
+    Returns the events and, per position, the flags to add. ``shapes`` selects
+    which rules run; substitution is the loosest and can be left out."""
+    shapes = tuple(shapes)
     n = len(tokens)
     text = [t for t, _ in tokens]
     flags = [tuple(f) for _, f in tokens]
@@ -130,8 +135,11 @@ def tag(tokens: Sequence[Tuple[str, Sequence[str]]]) -> Result:
             continue
         found = None
         # --- restatement: A == B, up to 3 words each, fillers allowed between ---
-        for la in (3, 2, 1):
-            if not span_ok(i, i + la) or any(_terminal(text[k]) for k in range(i, i + la - 1)):
+        for la in (3, 2, 1) if "restatement" in shapes else ():
+            # A sentence boundary anywhere in A -- including its last token --
+            # is a new sentence that happens to start with the same word
+            # ("...we call pathogenic. Pathogenic means..."), not a stutter.
+            if not span_ok(i, i + la) or any(_terminal(text[k]) for k in range(i, i + la)):
                 continue
             j = next_spoken(i + la)
             ea = " ".join(_expand(text[k]) for k in range(i, i + la))
@@ -145,7 +153,7 @@ def tag(tokens: Sequence[Tuple[str, Sequence[str]]]) -> Result:
             if found:
                 break
         # --- repair: completed partial ---
-        if not found and "partial_word" in flags[i]:
+        if not found and "completed_partial" in shapes and "partial_word" in flags[i]:
             j = next_spoken(i + 1)
             stem = _norm(text[i]).rstrip("-")
             if j < n and stem:
@@ -153,17 +161,28 @@ def tag(tokens: Sequence[Tuple[str, Sequence[str]]]) -> Result:
                 if nxt.startswith(stem) and len(nxt) > len(stem) and not nxt.endswith("-"):
                     found = ("repair", "completed_partial", [i], [j], 1)
         # --- repair: substitution, first word kept, one later word changed ---
-        if not found:
+        # The loosest shape. Two exclusions, measured on the fixture: a comma
+        # anywhere in the abandoned span marks a list item or a clause boundary
+        # ("about ourselves, about the future", "saying this, and this is"),
+        # and a capitalised restart after an uncapitalised span is a new
+        # sentence with the period missing ("...and motivation And then").
+        # "to adapt / to your" survives both; a shared infinitive marker before
+        # a verb and a preposition is the residual false positive, and the
+        # reason this shape is switchable (--repair-shapes).
+        if not found and "substitution" in shapes:
             for la in (2, 3):
                 if not span_ok(i, i + la) or any(_terminal(text[k]) for k in range(i, i + la)):
                     continue
+                if any(text[k].rstrip("\"')").endswith(",") for k in range(i, i + la)):
+                    continue        # a comma anywhere in A: a list item or a clause boundary
                 j = next_spoken(i + la)
                 if not span_ok(j, j + la):
                     continue
+                if text[j][:1].isupper() and not text[i][:1].isupper():
+                    continue
                 a = [_expand(text[k]) for k in range(i, i + la)]
                 b = [_expand(text[k]) for k in range(j, j + la)]
-                if a[0] == b[0] and a != b and sum(x != y for x, y in zip(a, b)) == 1 \
-                        and not any(_terminal(text[k]) for k in range(i, i + la)):
+                if a[0] == b[0] and a != b and sum(x != y for x, y in zip(a, b)) == 1:
                     found = ("repair", "substitution", list(range(i, i + la)), list(range(j, j + la)), la)
                     break
         if found:

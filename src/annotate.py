@@ -85,18 +85,17 @@ def annotate(doc: Dict[str, Any], dissenter_docs: Sequence[Dict[str, Any]], path
     return doc
 
 
-def tag_disfluencies(doc: Dict[str, Any]) -> Dict[str, Any]:
+def tag_disfluencies(doc: Dict[str, Any], shapes: Sequence[str] = disfluency.SHAPES) -> Dict[str, Any]:
     """Repetition and repair flags on the primary's spoken words (plan §5). Opt-in."""
     words = doc["words"]
     spoken = [k for k, w in enumerate(words) if "silence" not in (w.get("flags") or ())]
-    res = disfluency.tag([(words[k]["text"], words[k].get("flags") or ()) for k in spoken])
+    res = disfluency.tag([(words[k]["text"], words[k].get("flags") or ()) for k in spoken], shapes)
     for pos, fl in res.flags.items():
         k = spoken[pos]
         words[k]["flags"] = list(words[k]["flags"]) + [f for f in fl if f not in words[k]["flags"]]
     events = [dict(e.as_dict(), abandoned=[spoken[p] for p in e.abandoned],
                    restart=[spoken[p] for p in e.restart]) for e in res.events]
-    return {"rules": "pipeline/disfluency.py: restatement (<=3 words, fillers between, contractions "
-                     "expanded), completed partial, substitution (first word kept, one changed)",
+    return {"rules": "pipeline/disfluency.py", "shapes": list(shapes),
             "counts": res.counts(), "events": events}
 
 
@@ -107,6 +106,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dissenters", nargs="+", default=None, help="raw JSONs from the §7b models")
     p.add_argument("--disfluencies", action="store_true",
                    help="also tag repetitions and repairs on the primary (opt-in; rule-based, no model)")
+    p.add_argument("--repair-shapes", "--repair_shapes", dest="shapes", default=",".join(disfluency.SHAPES),
+                   help="which rules run, comma-separated (default all). 'substitution' is the loosest; "
+                        "drop it for a conservative tagging.")
     p.add_argument("-o", "--output", default=None, help="default: <stem>_annotated.json beside the primary")
     p.add_argument("--min-dissenters", "--min_dissenters", dest="min_dissenters", type=int, default=None,
                    help="how many must disagree (default: all of them)")
@@ -138,7 +140,12 @@ def main() -> None:
     out = Path(args.output) if args.output else src.parent / f"{stem}_annotated.json"
 
     if args.disfluencies:
-        block = tag_disfluencies(doc)
+        shapes = [x.strip() for x in args.shapes.split(",") if x.strip()]
+        bad = [x for x in shapes if x not in disfluency.SHAPES]
+        if bad:
+            logger.error("unknown repair shape(s) %s; choose from %s", bad, list(disfluency.SHAPES))
+            sys.exit(2)
+        block = tag_disfluencies(doc, shapes)
         doc.setdefault("annotation", {"created_utc": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")})
         doc["annotation"]["disfluencies"] = block
         logger.info("disfluencies: %s", block["counts"] or "none found")

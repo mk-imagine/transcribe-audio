@@ -160,6 +160,10 @@ coders and for counting hesitation rates, not for reading — the verbatim text 
 repetition — so they are off unless asked for, and the renderer marks only a repair, faintly, in
 HTML. Counts and events land in the record's `annotation.disfluencies`.
 
+Restatements and completed partials are tight; **substitution is the loose shape** — on the
+fixture about 11 of its 15 events are real, the rest lists without commas and `to VERB to
+PREP`. Drop it with `--repair-shapes restatement,completed_partial` for a conservative tagging.
+
 ---
 
 ## Stage 2 — render
