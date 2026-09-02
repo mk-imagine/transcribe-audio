@@ -132,6 +132,14 @@ refused rather than guessed at, so a new checkpoint needs a `ModelSpec` in
 `python3 tests/check_contract.py` runs 31 dependency-free checks — it needs no models, no
 GPU and no packages, so it runs on the Mac and on the login node alike.
 
+### Running stage 1.5 — the dissenters
+
+The three §7b dissenters run in `audio-transcribe-tf5` as ordinary stage-1 jobs, one model each
+(`--model Audio8/ARK-ASR-0.6B`, `nvidia/parakeet-tdt-0.6b-v3`,
+`ibm-granite/granite-speech-5.0-470m-turboctc`), then `src/annotate.py` combines them with the
+primary's record anywhere, no GPU. Together they cost ~8% of a CrisperWhisper run. They declare
+no timestamps, so each run records a warning that the aligner is not built — expected.
+
 ### Running stage 2
 
 Anywhere, including the Mac with nothing installed — it is pure Python over the JSON:

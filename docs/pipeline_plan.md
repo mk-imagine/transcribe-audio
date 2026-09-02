@@ -412,7 +412,7 @@ Anything recomputable from data is recomputed in stage 2.
 ```
 src/
   [x] transcribe_audio.py      # stage 1 CLI (keeps its name: the SLURM wrappers call it)
-  [ ] annotate.py              # stage 1.5 CLI
+  [x] annotate.py              # stage 1.5 CLI: proper-noun candidates by dissenter conjunction
   [x] render.py                # stage 2 CLI
   pipeline/
     [x] capabilities.py        # Capabilities, ModelSpec, plan_for()
@@ -423,8 +423,10 @@ src/
       [x] whisper.py           # generic openai/whisper-* only
       [x] mock.py              # six capability-declaring fakes, no weights
       [x] granite41plus.py     # two passes per 200 s window, aligned (Phase 3)
+      [x] ark.py  parakeet_tdt.py  granite_turboctc.py   # the §7b dissenters, text only
     [x] chunking.py            # fixed-window segmentation + retry by subdivision
-    [x] flags.py               # filled_pause / vocalization / partial_word tagging
+    [x] flags.py               # filled_pause / vocalization / partial_word / silence tagging
+    [x] fluent.py              # the §7b fluent view and three-dissenter conjunction
     [x] diarize.py             # pyannote wrapper
     [x] provenance.py          # hashes, revisions, package + git versions
     [x] schema.py              # raw JSON build/read/write + validate
@@ -443,7 +445,8 @@ src/
       [x] base.css  coding.css  lecture.css
 tests/
   [x] check_contract.py        # 41 dependency-free checks: stage 1 dispatch + the fixture
-  [x] check_render.py          # 21 dependency-free checks: stage 2 against the fixture
+  [x] check_render.py          # 26 dependency-free checks: stage 2 against the fixture
+  [x] check_annotate.py        # 8: the fluent view, the conjunction, annotate.py end to end
   [x] fixtures/golden.json     # committed; renderer tests need no models
 ```
 
@@ -952,6 +955,35 @@ The script that produced the earlier 0.8%/2.0% figures was not in `hpc/jobs/` �
 login-node run — so these rates stand on their own rather than as a replication; the fluent
 view here is written from this section's rules.
 
+#### Built (2026-09-01)
+
+Three adapters (`ark.py`, `parakeet_tdt.py`, `granite_turboctc.py`) registered like any other
+model, `pipeline/fluent.py` for the view and the conjunction, and `src/annotate.py` as stage 1.5:
+
+```bash
+# three ordinary stage-1 runs, in audio-transcribe-tf5 (they run in ~+8% of the primary's time)
+for M in Audio8/ARK-ASR-0.6B nvidia/parakeet-tdt-0.6b-v3 ibm-granite/granite-speech-5.0-470m-turboctc; do
+    python src/transcribe_audio.py -i x.wav -o transcripts/ --model $M --no_diarize --job_id ${M##*/}
+done
+# then, anywhere, instantly
+python src/annotate.py transcripts/x_raw.json --dissenters transcripts/x_job*_raw.json
+python src/render.py transcripts/x_annotated.json --profile coding       # candidates print as  word [NAME?]
+```
+
+The dissenters are separate runs because they cannot share a process with the primary:
+CrisperWhisper lives in `cw2diar`, these need `transformers` 5.16. That also happens to be what
+D1 wants — change the masking rule and `annotate.py` re-runs in a second with no GPU. The
+`annotation` block records every candidate, masked or not, with each dissenter's model id and
+revision; the flag is `proper_noun_candidate`, on the primary and the secondary stream alike.
+
+**The mask's blast radius, measured and closed.** A candidate beside a dropped marker or
+partial is masked — that removes the residue — but hesitation precedes retrieval of a hard
+name (`Eric Korshane [UH]` is the canonical shape), so the mask would hide exactly the tokens the
+detector exists for. Exemption: a **capitalised, non-sentence-initial** token is never masked.
+On the spike data that keeps `Korshane` and still masks `a`, `had`, `Like`: recall 5/5 on the
+name-dense window, residue 4 of 422. What the mask can still hide is a *lowercase* garble
+beside a marker (`psychatology`-class technical terms), which is the residual risk.
+
 ---
 
 ## 8. Phasing
@@ -1073,6 +1105,15 @@ renderer PR is merged. And a sliding-window variant of the card's incremental de
 `prefix_text` carrying the previous window's tail, might keep speaker numbers consistent
 across windows; unverified, a spike item.
 
+### Stage 1.5 — `annotate.py` and the dissenters
+
+**Done (2026-09-01).** The §7b design built end to end: three dissenter adapters, the fluent
+view with its two measured refinements and the name-like exemption, `annotate.py`, and the
+`[NAME?]` mark in both text and HTML. See §7b "Built" for usage and the verified run.
+
+What `annotate.py` does *not* do yet: `repetition` and `repair` tagging (§5), which is the
+`TextCleaner` BERT model repurposed from deleter to tagger. Same file, later.
+
 ### Phase 4 — Benchmark *(only if needed)*
 
 Only if Phase 0 leaves the model choice genuinely ambiguous. If so, measure **per-category
@@ -1147,7 +1188,7 @@ which arrives in Phase 3.
 | **Diarization at turn boundaries** | Short filler tokens near a speaker change are where max-overlap assignment is noisiest; hence smoothing within pause-bounded runs. |
 | **IRB / data governance** | Interview recordings are human-subjects data and stage 1 moves them to shared cluster storage. Assumed covered by the existing protocol; flagged because this pipeline automates the transfer. |
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
-| **Proper nouns: how to resolve a flagged token** | **Opened 2026-09-01, and genuinely open.** On the 45:00 window, `hotwords` produced the only exactly-correct spelling of the probe name and corrupted a neighbouring word doing it; `--mode intended` corrupted nothing and still got the name wrong (`Courchesney` x4). §7b's resolution step therefore has no good default. Worth measuring over the 12-window sweep, comparing **exact token forms**, not substrings: how often does each route land the correct spelling, and how often does hotword biasing damage a non-target token? D21's cost is established; the benefit's reliability is not. **Second example, from the first print proof:** `Dr. Geisler` at 14:03 came out `Dreisler` in **both** streams — the intended stream did not help at all this time — and the listener's own judgement was that the name is fast and soft enough to mishear without knowing it. That is the case a glossary exists for, and only a glossary fixes it. A render-time corrections file (`Dreisler: Geisler`, applied like the speaker map and recorded in the stamp) would keep the raw record lossless while fixing the printout; not built. |
+| **Proper nouns: how to resolve a flagged token** | **Detection is built (§7b, 2026-09-01); resolution is what remains open.** On the 45:00 window, `hotwords` produced the only exactly-correct spelling of the probe name and corrupted a neighbouring word doing it; `--mode intended` corrupted nothing and still got the name wrong (`Courchesney` x4). §7b's resolution step therefore has no good default. Worth measuring over the 12-window sweep, comparing **exact token forms**, not substrings: how often does each route land the correct spelling, and how often does hotword biasing damage a non-target token? D21's cost is established; the benefit's reliability is not. **Second example, from the first print proof:** `Dr. Geisler` at 14:03 came out `Dreisler` in **both** streams — the intended stream did not help at all this time — and the listener's own judgement was that the name is fast and soft enough to mishear without knowing it. That is the case a glossary exists for, and only a glossary fixes it. A render-time corrections file (`Dreisler: Geisler`, applied like the speaker map and recorded in the stamp) would keep the raw record lossless while fixing the printout; not built. |
 | **Forced alignment (`align.py`)** | Dispatched to but not built. No registered real model declares `word_timestamps="none"`, so nothing needs it yet; the run records the gap in `warnings` rather than emitting untimed words that look timed. Build it when a model needs it, using `CrisperWhisperModel.forced_align()`. |
 | **Speaker identification from an enrolled embedding library** | **Far future — logged 2026-09-01, not scheduled.** Diarization *is* embedding + clustering, and `community-1` computes a per-label embedding internally (its config names an embedding model in the clustering step) and discards it. The feature: a stage-1.5 pass that takes each label's centroid, cosine-matches it against enrolled voices, and **emits a proposed `_speakers.yaml` with confidence scores** — never rewriting the raw labels (D3). It would also merge an over-split speaker automatically. **The constraint is not technical:** a library of participant voice embeddings is biometric data, a different consent and IRB category from a transcript; scope any library to non-participants (hosts, guest faculty) or make it per-study with consent first. Checked, not assumed: pyannote 4.0.3's diarization pipeline has **no `return_embeddings`** flag (only its speech-separation pipeline does; 3.x had it on diarization), so extracting the vectors is the spike's first question. Spike, per the house rule: centroids from two recordings of the same host; does cosine similarity clear the noise of different rooms and microphones? If it does, the cheap groundwork is storing per-label centroids in the raw JSON so a library can be built retroactively — stripped from any public fixture, the way the cluster user id was. |
 | **CrisperWhisper `confidence`** | Declared `False`. `TranscriptionResult` has no per-word confidence field, so `conf` is always null. Worth revisiting if a later package version exposes one — coders benefit from knowing which tokens the model was unsure of. |
