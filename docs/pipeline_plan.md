@@ -149,18 +149,40 @@ Source: HuggingFace model card. Released **2026-04-28**. **Apache 2.0**.
 
 - Word-level timestamps: `[T:N]` tags after each word, N in **centiseconds**, marking the
   **end** of the word. No start times.
+- **N is modulo 1000 — the tag rolls over every 10 seconds.** (Re-read 2026-09-01; the
+  entry above had omitted this.) "To reduce the amount of generated tokens, only the last three
+  digits are provided": `N = round(t·100) mod 1000`, and `t = N/100 + 10R` with R the rollover
+  count. The card's unwrap is `while end + offset < last_end: offset += 10`. An adapter that
+  reads N as plain centiseconds is correct for exactly the first ten seconds of every window.
 - **Silences are transcribed as `_` with their own end timestamp.** This is why `end_only` is
   usable: with explicit pause tokens, `word_start = previous_token_end` is correct and pause
   durations are recoverable.
-- Timestamp-mode prompt: `<|audio|> Timestamps: Transcribe the speech. After each word, add a
-  timestamp tag showing the end time in centiseconds, e.g. hello [T:45] world [T:82]`
+- **Length limits:** "works well with audio segments up to 9 minutes for ASR and SAA, and up
+  to 3.5 minutes for timestamps." So `longform="needs_chunking"` with a **≤210 s window in
+  timestamp mode** — smaller than the 300 s `SEGMENT_SIZE` the chunker defaults to.
+- Exact prompts (the card's; verbatim matters for a prompt-steered model):
+  - ASR: `<|audio|> can you transcribe the speech into a written format?`
+  - SAA: `<|audio|> Speaker attribution: Transcribe and denote who is speaking by adding
+    [Speaker 1]: and [Speaker 2]: tags before speaker turns.`
+  - TS: `<|audio|> Timestamps: Transcribe the speech. After each word, add a timestamp tag
+    showing the end time in centiseconds, e.g. hello [T:45] world [T:82]` — with
+    `max_new_tokens=10000`
+  - KWB: append `Keywords: …` to any prompt; terms absent from the audio are tolerated.
+- Invocation: `AutoProcessor` + `AutoModelForSpeechSeq2Seq`, bf16, a **fixed** system prompt
+  (`Today's Date: December 19, 2024` — the card's, not the wall clock), chat template with
+  `add_generation_prompt=True`, `generate(do_sample=False, num_beams=1)`, decode only the new
+  tokens. Native in `transformers>=5.8`.
+- **Incremental decoding:** `apply_chat_template(..., prefix_text=previous_transcript)` — the
+  template emits the prefix right after the generation prompt (confirmed in the snapshot's
+  `chat_template.jinja`), and the *audio accumulates* too. The card names it as the way "to
+  maintain the speaker numbering in SAA mode" across segments, which means **speaker numbers
+  restart per chunk without it** — they are ordinals by first appearance, not identities.
 - Speaker attribution mode: emits `[Speaker 1]:` / `[Speaker 2]:` tags, numbered by first appearance
-- Other modes: plain ASR, incremental decoding, keyword-list biasing
 - **The plus variant does not produce punctuation or capitalisation** (unlike base 4.1-2b)
 - No verbatim or disfluency claim anywhere on the card
-- ~2 B params ≈ 4 GB bf16
+- ~2 B params ≈ 4 GB bf16; snapshot `1454e6e1` cached on POLARIS
 - **OPEN:** whether timestamp mode and speaker-attribution mode can be combined in one prompt.
-  Undocumented, and this project needs both. Phase 0 question 2.
+  Undocumented, and this project needs both. Phase 0 question 2 — spike submitted 2026-09-01.
 
 ### Measured behaviour (2026-08-31, real audio)
 
