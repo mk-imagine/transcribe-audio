@@ -112,6 +112,24 @@ _register(_spec("ibm-granite/granite-speech-4.1-2b-plus", _GRANITE, _GRANITE_CAP
                 notes="Two passes per 200 s window (timestamps, then speaker attribution); "
                       "the modes do not combine in one prompt. Speaker labels are per-window."))
 
+# --- §7b dissenters: three independent lineages ----------------------------
+# Text-only models used to localise proper-noun garbles by disagreement (D18).
+# They declare no timestamps, so a run through them records untimed words and
+# a warning that the aligner is not built; annotate.py needs only their text.
+_DISSENTER_CAPS = Capabilities(
+    word_timestamps="none", verbatim="no", speaker_labels=False,
+    silence_tokens=False, longform="needs_chunking", confidence=False, hotwords="no",
+)
+_register(_spec("Audio8/ARK-ASR-0.6B", "pipeline.adapters.ark:ArkAsrAdapter", _DISSENTER_CAPS,
+                notes="AutoArk lineage. 30 s windows (card cap); cast only the audio tensor to fp16."))
+_register(_spec("nvidia/parakeet-tdt-0.6b-v3", "pipeline.adapters.parakeet_tdt:ParakeetTdtAdapter",
+                _DISSENTER_CAPS,
+                notes="NeMo lineage, transformers port. 30 s windows, no overlap: the port drops "
+                      "content on longer inputs and the pipeline's stride duplicates it."))
+_register(_spec("ibm-granite/granite-speech-5.0-470m-turboctc",
+                "pipeline.adapters.granite_turboctc:GraniteTurboCtcAdapter", _DISSENTER_CAPS,
+                notes="IBM lineage, CTC. Never chunk_length_s (bug 14)."))
+
 # --- Mocks: no weights, no ML dependencies ---------------------------------
 _MOCKS = {
     "mock/start-end": ("MockStartEndAdapter", "CrisperWhisper 2 shape"),

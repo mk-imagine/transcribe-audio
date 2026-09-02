@@ -37,6 +37,9 @@ def render(turns: List[Turn], stamp: Dict[str, Any], params: RenderParams) -> st
             if w.i in t.anchors:
                 ps.append(f"[{fmt_time(w.start or 0.0, offset)}]")
             ps.append(w.text)
+            if "proper_noun_candidate" in w.flags:
+                # §7b: a flag is worth more to a coder than a confident wrong spelling.
+                ps.append("[NAME?]")
         return ps
 
     n = 0

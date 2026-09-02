@@ -28,6 +28,10 @@ p.line { margin: 0; }
 .anchor { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 8pt; color: var(--anchor); }
 .marker { color: var(--marker); font-variant: small-caps; font-size: .92em; }
 .partial { color: var(--marker); }
+/* a proper-noun candidate: every dissenter disagreed (plan §7b). Marked so a
+   coder checks the audio; never silently corrected. */
+.candidate { text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cand-mark { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .62em; color: var(--marker); margin-left: .15em; }
 @media print {
   body { background: #fff; }
   a { color: inherit; text-decoration: none; }

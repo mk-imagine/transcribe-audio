@@ -131,8 +131,12 @@ def select_stream(doc: Dict[str, Any], wanted: str) -> Tuple[List[Dict[str, Any]
 
 
 def to_rwords(words: List[Dict[str, Any]]) -> List[RWord]:
+    """Silence tokens (Granite's ``_``) are timing, not text: they would bridge
+    every pause the pause rule looks for, and print as underscores. Dropped here,
+    at the boundary; the record keeps them."""
     return [
         RWord(i=w["i"], text=w["text"], start=w.get("start"), end=w.get("end"),
               flags=tuple(w.get("flags") or ()))
         for w in words
+        if "silence" not in (w.get("flags") or ())
     ]
