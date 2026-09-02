@@ -1,0 +1,34 @@
+/* Shared by both profiles. Zero dependencies (D11): the whole stylesheet is
+   inlined into the HTML, so the file prints from any browser with Cmd+P. */
+:root {
+  --ink: #1a1a1a; --muted: #6b6b6b; --rule: #d9d9d9; --marker: #7a4f1f; --anchor: #4a6b8a;
+}
+* { box-sizing: border-box; }
+html { font-size: 11pt; }
+body {
+  margin: 0; color: var(--ink); background: #fff;
+  font-family: Georgia, "Times New Roman", serif; line-height: 1.45;
+}
+header.stamp {
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 8pt; line-height: 1.35;
+  color: var(--muted); border-bottom: 1px solid var(--rule); padding-bottom: .6em; margin-bottom: 1.4em;
+}
+header.stamp dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; column-gap: .9em; row-gap: .1em; }
+header.stamp dt { margin: 0; }
+header.stamp dd { margin: 0; }
+header.stamp .warning { color: #9a2c0c; }
+h1 { font-size: 1.15rem; font-weight: normal; margin: 0 0 .3em; letter-spacing: .01em; }
+section.turn { margin: 0 0 1.1em; }
+h2.turn-head {
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 8.5pt; font-weight: normal;
+  color: var(--muted); margin: 0 0 .25em; letter-spacing: .02em;
+}
+h2.turn-head .spk { color: var(--ink); font-weight: bold; }
+p.line { margin: 0; }
+.anchor { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 8pt; color: var(--anchor); }
+.marker { color: var(--marker); font-variant: small-caps; font-size: .92em; }
+.partial { color: var(--marker); }
+@media print {
+  body { background: #fff; }
+  a { color: inherit; text-decoration: none; }
+}
