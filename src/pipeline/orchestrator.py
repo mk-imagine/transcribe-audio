@@ -159,6 +159,7 @@ def transcribe(args) -> Dict[str, Any]:
         granularity=getattr(args, "timestamp_mode", None),
         backend=getattr(args, "backend", None),
         dual_stream=getattr(args, "dual_stream", None) or None,
+        compute_type=getattr(args, "compute_type", None),
     )
     caps = adapter.capabilities
 
