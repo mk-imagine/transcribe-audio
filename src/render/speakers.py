@@ -38,18 +38,26 @@ def assign(words: List[RWord], turns: List[Dict[str, Any]]) -> None:
         if w.start is None or w.end is None:
             w.speaker_raw = w.speaker = None
             continue
+        mid = (w.start + w.end) / 2
         # Only turns starting before the word ends can overlap it; turns are
         # bounded in length, so those starting before (w.start - max_len) cannot.
         lo = bisect.bisect_left(starts, w.start - max_len)
         hi = bisect.bisect_right(starts, w.end)
-        best, best_ov = None, 0.0
+        best, best_score = None, -1.0
         for t in ts[lo:hi]:
             ov = min(w.end, t["end"]) - max(w.start, t["start"])
-            if ov > best_ov:
-                best, best_ov = t, ov
+            # A zero-duration word -- the aligner does emit them -- overlaps
+            # nothing, so containment has to count on its own. Found on the
+            # first print proof: "think", start == end, sitting inside a 28 s
+            # SPEAKER_00 turn, was attributed to a SPEAKER_02 turn 7 s away.
+            score = ov if ov > 0 else (0.0 if t["start"] <= mid <= t["end"] else -1.0)
+            if score > best_score:
+                best, best_score = t, score
         if best is None:
-            mid = (w.start + w.end) / 2
-            best = min(ts, key=lambda t: min(abs(mid - t["start"]), abs(mid - t["end"])))
+            # Nothing overlaps or contains it: the word is in a diarizer gap.
+            # Distance to the nearest edge; a containing turn would be 0.
+            best = min(ts, key=lambda t: 0.0 if t["start"] <= mid <= t["end"]
+                       else min(abs(mid - t["start"]), abs(mid - t["end"])))
         w.speaker_raw = w.speaker = best["speaker"]
 
 

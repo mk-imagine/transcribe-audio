@@ -76,6 +76,22 @@ def _():
     assert [w.speaker for w in ws] == ["A", "A", "B", "B"], [w.speaker for w in ws]
 
 
+@check("a zero-duration word inside a turn belongs to that turn, not to a nearer edge")
+def _():
+    turns = [{"start": 0.0, "end": 28.0, "speaker": "A"}, {"start": 30.0, "end": 31.0, "speaker": "C"}]
+    ws = [RWord(0, "think", 25.0, 25.0), RWord(1, "x", 29.5, 29.7), RWord(2, "y", 34.0, 34.2)]
+    speakers.assign(ws, turns)
+    assert ws[0].speaker == "A", ws[0].speaker          # contained, zero overlap
+    assert ws[1].speaker == "C", ws[1].speaker          # in a gap, nearer C's start
+    assert ws[2].speaker == "C", ws[2].speaker          # past the end, nearest is C
+    # On the fixture: any word whose midpoint a turn contains is assigned within
+    # a turn that contains it.
+    ws = to_rwords(DOC["words"]); T = DOC["speaker_turns"]; speakers.assign(ws, T)
+    def containing(w): return {t["speaker"] for t in T if t["start"] <= (w.start + w.end) / 2 <= t["end"]}
+    wrong = [w for w in ws if containing(w) and w.speaker_raw not in containing(w)]
+    assert not wrong, [(w.i, w.text, w.speaker_raw) for w in wrong[:3]]
+
+
 @check("no turns -> no speakers, and the render still works")
 def _():
     ws = to_rwords(DOC["words"][:20]); speakers.assign(ws, [])
