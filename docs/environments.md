@@ -71,6 +71,11 @@ git fetch https://github.com/mk-imagine/transcribe-audio.git <branch>
 `sched/backfill`. A shorter `--time` earns **no** priority; it only helps by fitting a
 backfill gap. `gpucluster` is usually idle, so jobs typically start immediately.
 
+**Per-user limits** (QOS `simple-qos`, read from `sacctmgr show qos` 2026-09-02): **2 jobs
+running, 5 submitted.** A third job waits with reason `QOSMaxJobsPerUserLimit` even when a node is
+idle; a sixth submission is refused. Three lectures submitted together therefore run two-then-one,
+which is fine — but a per-file sweep should submit at most five, or chain them.
+
 Chain dependent work rather than polling: `sbatch --dependency=afterany:<jobid>`.
 
 **Gotcha:** `echo "EXIT=$?"` after `cmd | tail` captures `tail`'s status, not the command's.
