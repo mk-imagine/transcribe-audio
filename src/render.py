@@ -15,7 +15,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -60,6 +60,26 @@ def render_all(doc: Dict[str, Any], params: RenderParams, formats: List[str]) ->
     return {name: FORMATS[name].render(turns, st, params) for name in formats}
 
 
+def resolve_speaker_map(src: Path, stem: str, explicit: Optional[str], enabled: bool) -> Optional[str]:
+    """An explicit --speaker-map wins; otherwise the sidecar beside the input.
+
+    Labels are numbered by first appearance within one diarizer run, so a map
+    is per-recording by nature. Keeping it as ``<stem>_speakers.yaml`` next to
+    ``<stem>_raw.json`` means the record and its names travel together and the
+    flag is not retyped on every re-render. Whichever was used is recorded in
+    the stamp, so the output says which names it carries and where they came from.
+    """
+    if explicit:
+        return explicit
+    if not enabled:
+        return None
+    sidecar = src.parent / f"{stem}_speakers.yaml"
+    if sidecar.is_file():
+        logger.info("using sidecar speaker map: %s", sidecar)
+        return str(sidecar)
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Stage 2: render a raw JSON record.",
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -69,7 +89,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--format", default="html",
                    help="comma-separated extras beyond txt, which is always written: html, plain")
     p.add_argument("--speaker-map", "--speaker_map", dest="speaker_map", default=None,
-                   help="file of 'SPEAKER_00: Name' lines, applied at render time")
+                   help="file of 'SPEAKER_00: Name' lines, applied at render time. Default: "
+                        "<stem>_speakers.yaml beside the input, if it exists")
+    p.add_argument("--no-speaker-map", "--no_speaker_map", dest="use_speaker_map",
+                   action="store_false", help="ignore a sidecar map; render the anonymous labels")
     p.add_argument("--pause-threshold", "--pause_threshold", dest="pause_threshold",
                    type=float, default=0.5, help="seconds of silence that ends a sentence (default 0.5)")
     p.add_argument("--anchor-interval", "--anchor_interval", dest="anchor_interval",
@@ -100,10 +123,13 @@ def main() -> None:
         sys.exit(2)
     formats = ["txt"] + [f for f in extras if f != "txt"]
 
+    stem = src.stem[:-4] if src.stem.endswith("_raw") else src.stem
+    speaker_map = resolve_speaker_map(src, stem, args.speaker_map, args.use_speaker_map)
+
     params = RenderParams(
         profile=PROFILES[args.profile], pause_threshold=args.pause_threshold,
         anchor_interval=args.anchor_interval, smoothing=args.smoothing,
-        max_island=args.max_island, speaker_map_path=args.speaker_map,
+        max_island=args.max_island, speaker_map_path=speaker_map,
         apply_offset=args.apply_offset, width=args.width,
     )
     try:
@@ -114,7 +140,6 @@ def main() -> None:
 
     out_dir = Path(args.output_dir) if args.output_dir else src.parent
     out_dir.mkdir(parents=True, exist_ok=True)
-    stem = src.stem[:-4] if src.stem.endswith("_raw") else src.stem
     suffix = {"txt": ".txt", "html": ".html", "plain": "_plain.txt"}
     for name, text in outputs.items():
         path = out_dir / f"{stem}_{args.profile}{suffix[name]}"

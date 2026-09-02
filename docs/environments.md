@@ -138,7 +138,9 @@ python3 src/render.py transcripts/out/<name>_raw.json --profile lecture --format
 ```
 
 Outputs `<name>_<profile>.txt`, `.html` (print with Cmd+P; the coding margin is in the
-`@page` rule) and `_plain.txt`. `--speaker-map` takes a file of `SPEAKER_00: Name` lines.
+`@page` rule) and `_plain.txt`. `--speaker-map` takes a file of `SPEAKER_00: Name` lines; a `<name>_speakers.yaml` beside
+the input is used automatically, and two labels may map to one name to merge an over-split
+speaker. Labels are per-recording, so each recording gets its own sidecar.
 `python3 tests/check_render.py` runs the 21 stage-2 checks against the committed fixture.
 
 ### Data

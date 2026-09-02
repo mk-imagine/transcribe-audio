@@ -314,6 +314,25 @@ def _():
                 assert (Path(td) / f"golden_{prof}{suf}").exists(), suf
 
 
+@check("a <stem>_speakers.yaml beside the input is picked up; --no-speaker-map ignores it; explicit wins")
+def _():
+    import shutil
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        shutil.copy(FIXTURE, td / "rec_raw.json")
+        (td / "rec_speakers.yaml").write_text("SPEAKER_00: Sidecar Name\n")
+        (td / "other.yaml").write_text("SPEAKER_00: Explicit Name\n")
+        def run(*extra):
+            r = subprocess.run([sys.executable, str(ROOT / "src" / "render.py"), str(td / "rec_raw.json"),
+                                "-o", str(td), "--profile", "coding", *extra], capture_output=True, text=True)
+            assert r.returncode == 0, r.stderr[-300:]
+            return (td / "rec_coding.txt").read_text()
+        assert "Sidecar Name" in run() and "rec_speakers.yaml" in run()
+        assert "Sidecar Name" not in run("--no-speaker-map") and "SPEAKER_00" in run("--no-speaker-map")
+        t = run("--speaker-map", str(td / "other.yaml"))
+        assert "Explicit Name" in t and "Sidecar Name" not in t
+
+
 @check("the CLI refuses a bad format and a malformed speaker map with exit 2")
 def _():
     with tempfile.TemporaryDirectory() as td:

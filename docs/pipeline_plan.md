@@ -658,6 +658,18 @@ pyannote emits `SPEAKER_00`. The existing transcript already shows real names be
 ("Dr. Geisler" alongside "Speaker C"), so this step exists informally. Make it an editable map
 file read at render time: identify once, re-render forever, fix a misattribution without a GPU.
 
+**Built (2026-09-01).** `--speaker-map`, a file of `SPEAKER_00: Name` lines, applied after
+assignment and smoothing and before turn grouping; the raw JSON is never touched, and the stamp
+records which file was used and which labels it left unmapped. Three properties worth knowing:
+
+- **It is per-recording by nature.** Labels are numbered by first appearance within one
+  diarizer run, so `SPEAKER_00` in one file is unrelated to `SPEAKER_00` in the next. The
+  convention is a sidecar, `<stem>_speakers.yaml` beside `<stem>_raw.json`, which the renderer
+  picks up automatically; `--no-speaker-map` renders the anonymous labels on purpose.
+- **Two labels may map to one name**, and turn grouping then merges them. That is the fix for
+  the diarizer splitting one person into two labels (three labels on the two-person fixture).
+- Sidecars naming real people are **not committed** alongside a public fixture.
+
 ### Layout detail — resolved (D23)
 
 The coding margin is a **right-hand column**. Decided without polling the coders so Phase 2
@@ -979,6 +991,7 @@ which arrives in Phase 3.
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
 | **Proper nouns: how to resolve a flagged token** | **Opened 2026-09-01, and genuinely open.** On the 45:00 window, `hotwords` produced the only exactly-correct spelling of the probe name and corrupted a neighbouring word doing it; `--mode intended` corrupted nothing and still got the name wrong (`Courchesney` x4). §7b's resolution step therefore has no good default. Worth measuring over the 12-window sweep, comparing **exact token forms**, not substrings: how often does each route land the correct spelling, and how often does hotword biasing damage a non-target token? D21's cost is established; the benefit's reliability is not. **Second example, from the first print proof:** `Dr. Geisler` at 14:03 came out `Dreisler` in **both** streams — the intended stream did not help at all this time — and the listener's own judgement was that the name is fast and soft enough to mishear without knowing it. That is the case a glossary exists for, and only a glossary fixes it. A render-time corrections file (`Dreisler: Geisler`, applied like the speaker map and recorded in the stamp) would keep the raw record lossless while fixing the printout; not built. |
 | **Forced alignment (`align.py`)** | Dispatched to but not built. No registered real model declares `word_timestamps="none"`, so nothing needs it yet; the run records the gap in `warnings` rather than emitting untimed words that look timed. Build it when a model needs it, using `CrisperWhisperModel.forced_align()`. |
+| **Speaker identification from an enrolled embedding library** | **Far future — logged 2026-09-01, not scheduled.** Diarization *is* embedding + clustering, and `community-1` computes a per-label embedding internally (its config names an embedding model in the clustering step) and discards it. The feature: a stage-1.5 pass that takes each label's centroid, cosine-matches it against enrolled voices, and **emits a proposed `_speakers.yaml` with confidence scores** — never rewriting the raw labels (D3). It would also merge an over-split speaker automatically. **The constraint is not technical:** a library of participant voice embeddings is biometric data, a different consent and IRB category from a transcript; scope any library to non-participants (hosts, guest faculty) or make it per-study with consent first. Checked, not assumed: pyannote 4.0.3's diarization pipeline has **no `return_embeddings`** flag (only its speech-separation pipeline does; 3.x had it on diarization), so extracting the vectors is the spike's first question. Spike, per the house rule: centroids from two recordings of the same host; does cosine similarity clear the noise of different rooms and microphones? If it does, the cheap groundwork is storing per-label centroids in the raw JSON so a library can be built retroactively — stripped from any public fixture, the way the cluster user id was. |
 | **CrisperWhisper `confidence`** | Declared `False`. `TranscriptionResult` has no per-word confidence field, so `conf` is always null. Worth revisiting if a later package version exposes one — coders benefit from knowing which tokens the model was unsure of. |
 
 ---
