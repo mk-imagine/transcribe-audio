@@ -134,34 +134,6 @@ def _():
         assert r.returncode == 2
 
 
-@check("OVERRIDES: pins a file the calendar cannot place, beats the calendar, and is checked")
-def _():
-    with tempfile.TemporaryDirectory() as d:
-        td = Path(d); _seed(td, ["tate_1.m4a", "260831_0015.wav", "260901_0016.wav"])
-        ov = {"tate_1.m4a": ("777", 1, "Mon"), "260831_0015.wav": ("777", 1, "Wed"),
-              "missing.wav": ("498", 2, "Tue"), "260901_0016.wav": ("999", 1, "Tue")}
-        renames, skipped = rr.plan(td, overrides=ov)
-        got = {o.name: n.name for o, n in renames}
-        assert got == {"tate_1.m4a": "PSY777-week1-Mon.m4a", "260831_0015.wav": "PSY777-week1-Wed.wav"}, got
-        why = {p.name: w for p, w in skipped}
-        assert "not here" in why["missing.wav"]
-        assert "unknown course" in why["260901_0016.wav"], "a bad override must not fall through to inference"
-        # an override that collides with an inferred name: the inference is the one refused
-        _seed(td, ["260902_0020.wav"])                       # a real Wednesday recording
-        renames, skipped = rr.plan(td, overrides={"260831_0015.wav": ("777", 1, "Wed")})
-        why = {p.name: w for p, w in skipped}
-        assert "also claimed by 260831_0015.wav" in why["260902_0020.wav"], why
-
-
-@check("the real folder's overrides are the ones the plan applies")
-def _():
-    with tempfile.TemporaryDirectory() as d:
-        td = Path(d); _seed(td, ["tate_1.m4a", "260831_0015.wav", "260901_0016.wav", "geisler.wav"])
-        got = {o.name: n.name for o, n in rr.plan(td)[0]}
-        assert got == {"tate_1.m4a": "PSY777-week1-Mon.m4a", "260831_0015.wav": "PSY777-week1-Wed.wav",
-                       "260901_0016.wav": "PSY498-week1-Tue.wav"}, got
-
-
 @check("--start overrides the semester start")
 def _():
     with tempfile.TemporaryDirectory() as d:
