@@ -74,6 +74,10 @@ class AdapterResult:
     # on this pipeline is dominated by model load and a sha256 over the source
     # audio, so it cannot size a SLURM request (plan §8, Phase 0 question 3).
     performance: Dict[str, Any] = field(default_factory=dict)
+    # A model that attributes speakers itself is the diarizer for its own
+    # record; it describes that pass here and the orchestrator records it in
+    # the schema's `diarization` block instead of pyannote's.
+    diarization: Optional[Dict[str, Any]] = None
 
     @property
     def failed_ranges(self) -> List[tuple]:

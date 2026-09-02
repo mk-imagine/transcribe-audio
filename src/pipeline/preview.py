@@ -89,6 +89,8 @@ def render(doc: Dict[str, Any], *, timestamps: bool = True,
         buf, buf_start, buf_speaker = [], None, None
 
     for w in words:
+        if "silence" in (w.get("flags") or ()):
+            continue    # a pause token is timing, not text
         speaker = w.get("speaker") or _speaker_at(w.get("start"), turns)
         if buf and speaker != buf_speaker:
             flush()

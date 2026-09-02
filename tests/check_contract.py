@@ -70,14 +70,16 @@ def _():
         raise AssertionError("the MLX checkpoint resolved")
 
 
-@check("a Granite id fails with a sentence, not a NameError")
+@check("Granite 4.1-plus resolves to its adapter with the end_only / silence / speaker shape")
 def _():
-    try:
-        resolve("ibm-granite/granite-speech-4.1-2b-plus")
-    except UnsupportedModelError as exc:
-        assert "Phase 3" in str(exc)
-    else:
-        raise AssertionError("granite resolved but has no adapter")
+    spec = resolve("ibm-granite/granite-speech-4.1-2b-plus")
+    cls = load_adapter_class(spec)
+    c = cls.capabilities
+    assert (c.word_timestamps, c.silence_tokens, c.speaker_labels, c.longform, c.verbatim) == \
+        ("end_only", True, True, "needs_chunking", "no"), c
+    p = plan_for(c, diarize_requested=True)
+    assert p.derive_starts and p.chunking and not p.needs_diarizer and not p.warnings, p
+    assert not plan_for(c, mode="verbatim").ok, "verbatim must be refused"
 
 
 @check("an unknown id is refused with the supported list, never guessed at")
@@ -467,6 +469,22 @@ def _():
     assert segs == [("Speaker 1", "hello there"), ("Speaker 2", "hi"), ("Speaker 1", "ok")], segs
     assert parse_speakers("lead in [Speaker 1]: x") == [(None, "lead in"), ("Speaker 1", "x")]
     assert parse_speakers("no tags at all") == [(None, "no tags at all")]
+
+
+@check("Granite speaker alignment: TS words take the SAA speaker; silences and unmatched inherit")
+def _():
+    from pipeline.adapters.granite41plus import align_speakers, turns_from_labels
+    ws = [Word("_", None, 0.3, flags=("silence",)), Word("hello", None, 0.6), Word("there", None, 0.9),
+          Word("_", None, 1.4, flags=("silence",)), Word("hi", None, 1.7), Word("um", None, 1.9),
+          Word("ok", None, 2.2)]
+    segs = [("Speaker 1", "Hello, there."), ("Speaker 2", "Hi ok")]     # SAA drops the "um"
+    labels = align_speakers(ws, segs)
+    assert labels == ["Speaker 1", "Speaker 1", "Speaker 1", "Speaker 1", "Speaker 2", "Speaker 2", "Speaker 2"], labels
+    turns = turns_from_labels(ws, labels)
+    assert turns == [{"start": 0.3, "end": 0.9, "speaker": "Speaker 1"},
+                     {"start": 1.4, "end": 2.2, "speaker": "Speaker 2"}], turns
+    assert align_speakers(ws, [(None, "hello there hi um ok")]) == ["Speaker 1"] * 7
+    assert align_speakers(ws, []) == ["Speaker 1"] * 7
 
 
 @check("a silence token is flagged 'silence' by the tagger")

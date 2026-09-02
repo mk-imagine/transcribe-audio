@@ -16,20 +16,38 @@ Everything here follows the model card's own usage code (D19), re-read on
   this is a ``needs_chunking`` model with a window well under the chunker's
   300 s default.
 
-Speaker numbers are ordinals by first appearance and **restart per chunk**;
-the card's incremental decoding (``prefix_text``) is what carries them across
-segments. What that means for the declaration is settled by the Phase 3 spike.
+**Spike, 2026-09-01 (plan §3):** the timestamp and speaker-attribution modes
+do not combine in one prompt -- a fused prompt yields timestamp output with a
+single vestigial ``[Speaker 1]:`` and no attribution. So the adapter runs two
+passes per window: timestamps for the words, SAA for the turns, aligned by
+token sequence. The SAA turns go into the record's ``speaker_turns`` slot,
+where stage 2 treats them exactly like a diarizer's.
+
+Speaker numbers are ordinals by first appearance and restart per window; the
+card's incremental decoding (``prefix_text``, audio accumulating, capped at
+nine minutes) is what carries them across segments and cannot span an 80-min
+file. Labels are therefore namespaced by window when there is more than one
+(``w3:Speaker 1``), and the render-time speaker map merges them.
+
+Timestamp mode is lowercase and unpunctuated; ASR and SAA modes are not. The
+record carries the timestamped words as the model emitted them (D3), so
+stage 2's punctuation rule gets little from this model and the silence tokens
+carry the segmentation instead -- which is what they are for.
 """
 
 from __future__ import annotations
 
+import difflib
 import logging
+import math
 import re
+import time
 from pathlib import Path
-from typing import Any, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pipeline.adapters.base import Adapter, AdapterResult, Word
 from pipeline.capabilities import Capabilities
+from pipeline.chunking import transcribe_windows
 
 logger = logging.getLogger(__name__)
 
@@ -100,6 +118,67 @@ def parse_speakers(text: str) -> List[Tuple[Optional[str], str]]:
     return out
 
 
+_NORM = re.compile(r"[^a-z0-9]+")
+
+
+def _norm(token: str) -> str:
+    return _NORM.sub("", token.lower())
+
+
+def align_speakers(words: List[Word], segments: List[Tuple[Optional[str], str]]) -> List[str]:
+    """Give each timestamped word the speaker of its SAA counterpart.
+
+    The two passes transcribe the same audio with the same model, so their
+    token sequences are near-identical; ``SequenceMatcher`` on normalised
+    tokens pairs them. A word with no match inherits the previous word's
+    speaker. Silence tokens are skipped in the match and inherit too. Returns
+    one label per word, never None: a pass that emitted no tag at all is a
+    single speaker.
+    """
+    spoken = [(k, _norm(w.text)) for k, w in enumerate(words) if "silence" not in w.flags and _norm(w.text)]
+    saa: List[Tuple[str, str]] = []
+    for label, seg in segments:
+        for tok in seg.split():
+            n = _norm(tok)
+            if n:
+                saa.append((label or "Speaker 1", n))
+    labels: List[Optional[str]] = [None] * len(words)
+    if spoken and saa:
+        sm = difflib.SequenceMatcher(a=[t for _, t in spoken], b=[t for _, t in saa], autojunk=False)
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == "equal":
+                for d in range(i2 - i1):
+                    labels[spoken[i1 + d][0]] = saa[j1 + d][0]
+    first = next((lab for lab in labels if lab), (saa[0][0] if saa else "Speaker 1"))
+    out: List[str] = []
+    cur = first
+    for lab in labels:
+        if lab:
+            cur = lab
+        out.append(cur)
+    return out
+
+
+def turns_from_labels(words: List[Word], labels: List[str]) -> List[Dict[str, Any]]:
+    """Collapse per-word labels into time ranges. A word's start is the
+    previous token's end -- the same derivation the orchestrator applies -- and
+    the token before a turn is usually a silence, so a turn starts where the
+    silence ended."""
+    turns: List[Dict[str, Any]] = []
+    prev_end = 0.0
+    for w, lab in zip(words, labels):
+        start = prev_end
+        if w.end is not None:
+            prev_end = w.end
+        if "silence" in w.flags:
+            continue
+        if turns and turns[-1]["speaker"] == lab:
+            turns[-1]["end"] = w.end if w.end is not None else turns[-1]["end"]
+        else:
+            turns.append({"start": start, "end": w.end if w.end is not None else start, "speaker": lab})
+    return turns
+
+
 def load_audio_16k(path: Union[str, Path], start: float, duration: float):
     """16 kHz mono float32, the model's input. librosa, else soundfile + torchaudio."""
     try:
@@ -118,21 +197,25 @@ def load_audio_16k(path: Union[str, Path], start: float, duration: float):
 
 
 class Granite41PlusAdapter(Adapter):
-    """Declaration and dispatch are filled in once the Phase 3 spike settles
-    whether timestamp and speaker modes combine, and how speaker numbering
-    survives chunking. The loader and the prompt plumbing below are the card's."""
-
     capabilities = Capabilities(
         word_timestamps="end_only", verbatim="no", speaker_labels=True,
-        silence_tokens=True, longform="needs_chunking", confidence=False, hotwords="trained",
+        silence_tokens=True, longform="needs_chunking", confidence=False,
+        # Keyword-list biasing is a documented, evaluated feature of this
+        # checkpoint (the card reports keyword F1), unlike CrisperWhisper's.
+        hotwords="trained",
     )
 
-    def __init__(self, model_id: str, device, *, language: str = "en", **options: Any):
+    def __init__(self, model_id: str, device, *, language: str = "en",
+                 hotwords: Optional[List[str]] = None, **options: Any):
         super().__init__(model_id, device, **options)
         self.language = language
+        self.hotwords = list(hotwords or [])
         self.model = None
         self.processor = None
         self.tokenizer = None
+        self._turns: List[Dict[str, Any]] = []
+        self._perf: List[Tuple[float, float]] = []
+        self._notes: List[str] = []
 
     def load(self) -> None:
         import torch
@@ -166,4 +249,79 @@ class Granite41PlusAdapter(Adapter):
         return self.tokenizer.decode(new, add_special_tokens=False, skip_special_tokens=True)
 
     def transcribe(self, audio_path: Union[str, Path], duration: float) -> AdapterResult:
-        raise NotImplementedError("dispatch is written after the Phase 3 spike")
+        assert self.model is not None, "load() must be called before transcribe()"
+        self._turns, self._perf, self._notes = [], [], []
+        suffix = f" Keywords: {', '.join(self.hotwords)}" if self.hotwords else ""
+        n_windows = max(1, math.ceil(duration / TS_WINDOW_S))
+        params = {
+            "language": self.language,
+            "passes": ["ts", "saa"],
+            "prompt_ts": PROMPT_TS + suffix,
+            "prompt_saa": PROMPT_SAA + suffix,
+            "hotwords": self.hotwords or None,
+            "window_s": TS_WINDOW_S,
+            "windows": n_windows,
+            "max_new_tokens": {"ts": MAX_NEW_TOKENS["ts"], "saa": MAX_NEW_TOKENS["saa"]},
+            "decoding": "greedy",
+            "speaker_labels_namespaced": n_windows > 1,
+        }
+        path = str(audio_path)
+        words, errors = transcribe_windows(
+            lambda s, e: self._window(path, s, e, namespaced=n_windows > 1),
+            duration, segment_size=TS_WINDOW_S,
+        )
+        if n_windows > 1:
+            self._notes.append(
+                f"speaker labels are per-window ordinals over {n_windows} windows of "
+                f"{TS_WINDOW_S:.0f}s: the model numbers speakers by first appearance and "
+                "restarts each window, so w1:Speaker 1 and w2:Speaker 1 may or may not be the "
+                "same person. Merge them with a speaker map at render time."
+            )
+        if self._notes:
+            params["model_warnings"] = self._notes
+        gen = sum(dt for _, dt in self._perf)
+        perf = ({"processing_time_s": round(gen, 3), "realtime_factor": round(duration / gen, 1)}
+                if gen else {})
+        return AdapterResult(
+            words=words,
+            text=" ".join(w.text for w in words if "silence" not in w.flags),
+            speaker_turns=self._turns,
+            errors=errors,
+            params=params,
+            backend="transformers",
+            performance=perf,
+            diarization={
+                "model_id": self.model_id,
+                "source": "asr",
+                "params": {"prompt": PROMPT_SAA + suffix, "window_s": TS_WINDOW_S,
+                           "alignment": "SequenceMatcher on normalised tokens, per window"},
+            },
+        )
+
+    def _window(self, path: str, start: float, end: float, *, namespaced: bool) -> List[Word]:
+        """Both passes on one window. Returns window-relative words; turns are
+        shifted to absolute time and kept on the adapter."""
+        audio = load_audio_16k(path, start, end - start)
+        suffix = f" Keywords: {', '.join(self.hotwords)}" if self.hotwords else ""
+        t0 = time.perf_counter()
+        ts_text = self._generate(audio, PROMPT_TS + suffix, MAX_NEW_TOKENS["ts"])
+        saa_text = self._generate(audio, PROMPT_SAA + suffix, MAX_NEW_TOKENS["saa"])
+        dt = time.perf_counter() - t0
+        self._perf.append((end - start, dt))
+
+        words, mono, trailing = unwrap_timestamps(ts_text)
+        k = int(round(start / TS_WINDOW_S)) + 1
+        if not mono:
+            self._notes.append(f"window {k}: timestamps not monotonic after unwrap")
+        if trailing:
+            self._notes.append(f"window {k}: {len(trailing.split())} trailing token(s) carried no "
+                               f"timestamp and were dropped: {trailing[:60]!r}")
+        labels = align_speakers(words, parse_speakers(saa_text))
+        if namespaced:
+            labels = [f"w{k}:{lab}" for lab in labels]
+        for t in turns_from_labels(words, labels):
+            self._turns.append({"start": t["start"] + start, "end": t["end"] + start, "speaker": t["speaker"]})
+        logger.info("Window %.0f-%.0fs: %d tokens (%d silences), %d turn(s), %.1fs",
+                    start, end, len(words), sum(1 for w in words if "silence" in w.flags),
+                    len({t["speaker"] for t in self._turns[-len(labels):]}), dt)
+        return words
