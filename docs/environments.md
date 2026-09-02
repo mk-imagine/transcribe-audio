@@ -163,7 +163,8 @@ speaker. Labels are per-recording, so each recording gets its own sidecar.
 |---|---|---|
 | `geisler.wav` | 91.7 min | Lecture, **disfluency-rich** — the reference for verbatim testing. 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
 | `251211_0009.wav` | 80.7 min | **Proseminar guest lecture** — a visiting professor presenting their research, with host interaction. Multi-speaker, and the source of `tests/fixtures/golden.json`. *Not* a research-participant interview: there is no interview recording in `data/` yet. |
-| `tate_1.m4a` | 79.0 min | Lecture, low-disfluency speaker. Only `.m4a` source; exercises the decode-path penalty (bug 9). |
+| `PSY777-week1-Wed.m4a` | 79.0 min | PSY 777, week 1 Wednesday, 2026-08-26 — the first lecture recorded (was `tate_1.m4a`). Low-disfluency speaker. Only `.m4a` source; exercises the decode-path penalty (bug 9). |
+| `PSY777-week2-Mon.wav` | — | PSY 777, week 2 Monday, 2026-08-31 (was `260831_0015.wav`). |
 
 `.env` holds `HF_TOKEN` (mode 600), gitignored, required for pyannote.
 
