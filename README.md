@@ -144,7 +144,25 @@ Every candidate — flagged, masked, or allowlisted — is recorded in the outpu
 block with each dissenter's model id and revision. Changing a rule is a re-run in a second, no
 GPU. The dissenters run separately because they need a different environment from the primary.
 
-Not yet in `annotate.py`: `repetition` and `repair` tagging (see `docs/pipeline_plan.md` §5).
+### Repetition and repair tags (opt-in)
+
+```bash
+python src/annotate.py transcripts/x_raw.json --disfluencies                       # alone
+python src/annotate.py transcripts/x_raw.json --disfluencies --dissenters ...      # or together
+```
+
+Adds `repetition` and `repair` flags to the words, by rule, with no model: a span of up to three
+words immediately restated (`the the`, `not not mirror`, `You're you are`) is a repetition; a
+partial word the next word completes (`de- developmental`) or a short span restarted with one
+word changed (`I went I drove`) is a repair. The abandoned material is tagged and the restart
+stands, so one flag is one event. The text is never changed. These are for consistency across
+coders and for counting hesitation rates, not for reading — the verbatim text already shows a
+repetition — so they are off unless asked for, and the renderer marks only a repair, faintly, in
+HTML. Counts and events land in the record's `annotation.disfluencies`.
+
+Restatements and completed partials are tight; **substitution is the loose shape** — on the
+fixture about 11 of its 15 events are real, the rest lists without commas and `to VERB to
+PREP`. Drop it with `--repair-shapes restatement,completed_partial` for a conservative tagging.
 
 ---
 
@@ -201,7 +219,7 @@ timestamp is the durable reference.** In the coding profile a `proper_noun_candi
 ```
 
 Flags a word can carry: `filled_pause`, `vocalization`, `partial_word`, `silence` (Granite's
-pause tokens), and after stage 1.5, `proper_noun_candidate`. Speakers are absent from words
+pause tokens), and after stage 1.5, `proper_noun_candidate`, `repetition`, `repair`. Speakers are absent from words
 unless the model itself attributed them; diarizer turns are assigned at render time.
 `timing_source` says whether a timestamp is `native`, `derived` from the previous token's end,
 or `aligned`.
@@ -214,8 +232,8 @@ Three check suites, plain asserts, no dependencies — they run on the laptop an
 
 ```bash
 python3 tests/check_contract.py    # 49: dispatch, the registry, the fixture, Granite parsing, the dissenters
-python3 tests/check_render.py      # 26: stage 2 against the fixture
-python3 tests/check_annotate.py    # 9:  the fluent view, the conjunction, annotate.py end to end
+python3 tests/check_render.py      # 27: stage 2 against the fixture
+python3 tests/check_annotate.py    # 16: the fluent view, the conjunction, disfluency tags, annotate.py end to end
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified

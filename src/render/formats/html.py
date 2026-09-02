@@ -32,6 +32,11 @@ def _word(w: RWord) -> str:
         inner = f'<span class="partial">{text}</span>'
     else:
         inner = text
+    if "repair" in w.flags:
+        # The abandoned half of a self-correction (plan §5). "You're you are"
+        # reads like an error until it is marked as one; a repetition is not
+        # marked, since the text already shows it.
+        inner = f'<span class="reparandum">{inner}</span>'
     if "proper_noun_candidate" in w.flags:
         # Every dissenter disagreed with this token (§7b). Marked, never corrected.
         return f'<span class="candidate">{inner}</span><sup class="cand-mark">[NAME?]</sup>'

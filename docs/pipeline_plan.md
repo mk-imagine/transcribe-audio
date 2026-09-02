@@ -624,8 +624,9 @@ boundaries, which is the strongest argument for accurate start *and* end times.
 
 CW2 emits `[UH]` / `[UM]`, so filled pauses are machine-identifiable straight out of stage 1.
 Richer typing is what `annotate.py` is for; keeping it a separate pass means re-tagging with a
-better detector never means re-transcribing. The existing `TextCleaner` BERT model is the right
-detector — repurposed from **deleter to tagger**.
+better detector never means re-transcribing. `repetition` and `repair` are tagged there by rule
+(§8, Stage 1.5), opt-in; the `TextCleaner` BERT model, repurposed from **deleter to tagger**,
+stays an option for what rules do not reach.
 
 ---
 
@@ -1157,8 +1158,26 @@ across windows; unverified, a spike item.
 view with its two measured refinements and the name-like exemption, `annotate.py`, and the
 `[NAME?]` mark in both text and HTML. See §7b "Built" for usage and the verified run.
 
-What `annotate.py` does *not* do yet: `repetition` and `repair` tagging (§5), which is the
-`TextCleaner` BERT model repurposed from deleter to tagger. Same file, later.
+**`repetition` and `repair` tagging — built 2026-09-01, opt-in** (`annotate.py --disfluencies`,
+with or without `--dissenters`). Rule-based and deterministic in `pipeline/disfluency.py`, from
+context and from the tags stage 1 already emitted, as §3 said they could be: a span of up to
+three words immediately restated (fillers allowed between, contractions expanded so `You're you
+are` counts) is a **repetition**; a `partial_word` the next word completes (`de- developmental`)
+or a 2–3 word span restarted with its first word kept and one word changed (`I went I drove`)
+is a **repair**. The *abandoned* material is tagged and the restart stands, so one flag is one
+event and a per-speaker rate is a count. The text is never touched. Their value is consistency
+and counting, not reading — the verbatim text already shows `the the` — which is why they are
+opt-in and why the renderer marks only a reparandum, faintly, in HTML.
+
+**Measured on the fixture** (10 min, 1,969 words), after reading every event: 19 restatements,
+all plausible once two new-sentence-with-the-same-word cases were excluded; 5 completed
+partials, all right; **15 substitutions, of which about 11 are real.** The residue is two shapes
+a rule cannot separate from a repair without semantics — a list without commas (`a niece or
+nephew or something`) and a shared infinitive marker before a verb and a preposition (`to adapt
+to your environment`). Substitution is therefore its own shape in the counts and is switchable
+(`--repair-shapes restatement,completed_partial` for a conservative tagging). The BERT tagger the
+earlier draft of this paragraph named is not needed for the two tight shapes; it remains the
+option for the loose one and for editing terms, if a coding scheme ever wants them.
 
 ### Phase 4 — Benchmark *(only if needed)*
 

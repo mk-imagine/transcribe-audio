@@ -31,6 +31,7 @@ p.line { margin: 0; }
 /* a proper-noun candidate: every dissenter disagreed (plan §7b). Marked so a
    coder checks the audio; never silently corrected. */
 .candidate { text-decoration: underline dotted; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.reparandum { text-decoration: underline wavy; text-decoration-color: var(--rule); text-underline-offset: 3px; }
 .cand-mark { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .62em; color: var(--marker); margin-left: .15em; }
 @media print {
   body { background: #fff; }

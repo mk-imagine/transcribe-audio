@@ -128,6 +128,119 @@ def _dissenter_doc(base, text, model_id, k):
     return d
 
 
+# --------------------------------------------------------- disfluencies ----
+
+from pipeline import disfluency  # noqa: E402
+
+
+def _toks(*items):
+    """'the' -> plain; ('[UH]', 'filled_pause') -> flagged."""
+    return [(t, ()) if isinstance(t, str) else (t[0], tuple(t[1:])) for t in items]
+
+
+@check("repetition: the first copy is tagged, the restart stands; fillers between are allowed")
+def _():
+    r = disfluency.tag(_toks("the", "the", "bone"))
+    assert r.flags == {0: ["repetition"]} and r.counts() == {"repetition": 1, "repetition:restatement": 1}
+    r = disfluency.tag(_toks("the", ("[UH]", "filled_pause"), "the", "bone"))
+    assert r.flags == {0: ["repetition"]}, r.flags
+    r = disfluency.tag(_toks("not", "not", "mirror", "images."))
+    assert list(r.flags) == [0]
+
+
+@check("repetition: phrases up to three words, greedy left to right ('as as as a as a')")
+def _():
+    r = disfluency.tag(_toks("as", "as", "as", "a", "as", "a"))
+    assert sorted(r.flags) == [0, 1, 2, 3], r.flags          # "as" "as" then "as a"
+    assert r.counts()["repetition"] == 3
+    r = disfluency.tag(_toks("we", "used", "to", "we", "used", "to", "read"))
+    assert sorted(r.flags) == [0, 1, 2] and 3 not in r.flags
+
+
+@check("repetition: contractions expand, so 'You're you are' is a restatement")
+def _():
+    r = disfluency.tag(_toks("You're", "you", "are", "so"))
+    assert r.flags == {0: ["repetition"]}, r.flags
+    assert disfluency.tag(_toks("it's", "it", "is")).flags == {0: ["repetition"]}
+
+
+@check("repair: a partial completed by the next word is a repair; an unrelated next word is not")
+def _():
+    r = disfluency.tag(_toks(("de-", "partial_word"), "developmental"))
+    assert r.flags == {0: ["repair"]} and r.counts()["repair:completed_partial"] == 1
+    assert disfluency.tag(_toks(("d-", "partial_word"), "what")).flags == {}
+    r = disfluency.tag(_toks(("d-", "partial_word"), ("d-", "partial_word"), "what"))
+    assert r.flags == {0: ["repetition"]}, r.flags
+
+
+@check("repair: substitution keeps the first word and changes one; a sentence boundary is not a repair")
+def _():
+    r = disfluency.tag(_toks("I", "went", "I", "drove", "there."))
+    assert r.flags == {0: ["repair"], 1: ["repair"]} and r.counts()["repair:substitution"] == 1
+    assert disfluency.tag(_toks("I", "came.", "I", "saw.")).flags == {}
+    assert disfluency.tag(_toks("I", "went", "we", "drove")).flags == {}
+
+
+@check("the exclusions: a comma list, a capitalised restart, and a restatement across a period are not events")
+def _():
+    assert disfluency.tag(_toks("about", "ourselves,", "about", "the", "future,", "about", "the", "world.")).flags == {}
+    assert disfluency.tag(_toks("illness", "and", "motivation", "And", "then")).flags == {}
+    assert disfluency.tag(_toks("call", "pathogenic.", "Pathogenic", "means")).flags == {}
+    assert disfluency.tag(_toks("saying", "this,", "and", "this", "is")).flags == {}
+    assert disfluency.tag(_toks("I", "went", "I", "drove")).flags == {0: ["repair"], 1: ["repair"]}
+
+
+@check("shapes are selectable: without 'substitution', only partials and restatements are tagged")
+def _():
+    toks = _toks("I", "went", "I", "drove", ("de-", "partial_word"), "developmental", "the", "the")
+    full = disfluency.tag(toks).counts()
+    assert full == {"repair": 2, "repair:completed_partial": 1, "repair:substitution": 1, "repetition": 1, "repetition:restatement": 1}, full
+    cons = disfluency.tag(toks, ("restatement", "completed_partial")).counts()
+    assert "repair:substitution" not in cons and cons["repair"] == 1 and cons["repetition"] == 1
+
+
+@check("disfluency tags on the fixture: repetitions exist, every tagged copy equals its restart")
+def _():
+    base = json.loads(FIXTURE.read_text())
+    words = [w for w in base["words"] if "silence" not in w["flags"]]
+    r = disfluency.tag([(w["text"], tuple(w["flags"])) for w in words])
+    c = r.counts()
+    assert c.get("repetition", 0) >= 5, c
+    for e in r.events:
+        if e.shape == "restatement":
+            a = " ".join(disfluency._expand(words[k]["text"]) for k in e.abandoned)
+            b = " ".join(disfluency._expand(words[k]["text"]) for k in e.restart)
+            assert a == b, (a, b)
+
+
+@check("annotate.py --disfluencies works alone, with dissenters, and is off unless asked")
+def _():
+    base = json.loads(FIXTURE.read_text())
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td); prim = td / "rec_raw.json"; schema.write(prim, base)
+        r = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(prim)], capture_output=True, text=True)
+        assert r.returncode == 2 and "nothing to do" in r.stderr
+        r = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(prim), "--disfluencies"],
+                           capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr[-300:]
+        out = json.loads((td / "rec_annotated.json").read_text())
+        assert schema.validate(out) == []
+        tagged = [w for w in out["words"] if "repetition" in w["flags"] or "repair" in w["flags"]]
+        assert tagged and out["annotation"]["disfluencies"]["counts"]["repetition"] >= 5
+        assert all(out["words"][k]["text"] == base["words"][k]["text"] for k in range(len(base["words"]))), "text untouched"
+        # with dissenters too: both blocks present, neither clobbers the other
+        ids = ["Audio8/ARK-ASR-0.6B", "nvidia/parakeet-tdt-0.6b-v3", "ibm-granite/granite-speech-5.0-470m-turboctc"]
+        ft = " ".join(w["text"] for w in base["words"] if not w["text"].startswith("[") and not w["text"].endswith("-"))
+        dp = []
+        for k, mid in enumerate(ids):
+            p = td / f"d{k}_raw.json"; schema.write(p, _dissenter_doc(base, ft, mid, k)); dp.append(str(p))
+        r = subprocess.run([sys.executable, str(ROOT / "src" / "annotate.py"), str(prim), "--disfluencies",
+                            "--dissenters", *dp, "-o", str(td / "both.json")], capture_output=True, text=True)
+        assert r.returncode == 0, r.stderr[-300:]
+        both = json.loads((td / "both.json").read_text())["annotation"]
+        assert "disfluencies" in both and "primary" in both and "dissenters" in both
+
+
 @check("annotate.py end to end: flags a planted garble, masks a planted residue, records provenance")
 def _():
     base = json.loads(FIXTURE.read_text())
