@@ -22,12 +22,33 @@ from render import RWord, Sentence, Turn
 TERMINAL = (".", "?", "!")
 _CLOSERS = "\"')]”’»"
 
+# A period after one of these is an abbreviation, not the end of a sentence.
+# Found on the first print proof: "Dr." became line 174 and the name it
+# introduced became line 175. Conservative on purpose -- an abbreviation that
+# does end a sentence merely merges into the next one, and the pause rule
+# still splits there if the speaker paused; a real sentence split in half
+# puts a bare "Dr." on its own numbered line.
+ABBREVIATIONS = frozenset({
+    "dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "mt", "ft",
+    "vs", "etc", "eg", "ie", "no", "inc", "ltd", "co", "dept", "univ",
+    "phd", "md", "ba", "bs", "ma", "us", "uk",
+})
+
 
 def is_terminal(word: RWord) -> bool:
-    """Ends a sentence: terminal punctuation, and not a bracketed marker."""
+    """Ends a sentence: terminal punctuation, not a marker, not an abbreviation."""
     if word.is_marker:
         return False
-    return word.text.rstrip(_CLOSERS).endswith(TERMINAL)
+    core = word.text.rstrip(_CLOSERS)
+    if not core.endswith(TERMINAL):
+        return False
+    if core.endswith("."):
+        stem = core[:-1].replace(".", "").lower()          # "e.g." -> "eg", "Ph.D." -> "phd"
+        if stem in ABBREVIATIONS:
+            return False
+        if len(stem) == 1 and stem.isalpha() and core[0].isupper():   # an initial: "J. Smith"
+            return False
+    return True
 
 
 def gap(a: RWord, b: RWord) -> Optional[float]:

@@ -165,7 +165,19 @@ def _():
     assert not segment.is_terminal(RWord(0, "[laughter]", 0, 1))
     assert segment.is_terminal(RWord(0, "done.", 0, 1))
     assert segment.is_terminal(RWord(0, 'right?"', 0, 1))
-    assert not segment.is_terminal(RWord(0, "Dr.", 0, 1)) is False   # abbreviations are a known limitation
+
+
+@check("an abbreviation or an initial does not end a sentence: 'Dr. Geisler' stays on one line")
+def _():
+    for tok in ("Dr.", "Mrs.", "Prof.", "e.g.", "Ph.D.", "J.", "vs.", "etc."):
+        assert not segment.is_terminal(RWord(0, tok, 0, 1)), tok
+    for tok in ("door.", "year.", "Yes.", "a.", "ok!", "why?"):
+        assert segment.is_terminal(RWord(0, tok, 0, 1)), tok
+    # And on the fixture: no numbered line is a bare abbreviation.
+    (turns, st), params, _ = _prepare("coding")
+    text = fmt_txt.render(turns, st, params)
+    bare = [ln for ln in text.splitlines() if re.match(r"^\s*\d+  (Dr|Mr|Mrs|Ms|Prof)\.$", ln)]
+    assert not bare, bare
 
 
 @check("consecutive turns always change speaker; the diarizer's 59 segments become fewer turns")
