@@ -921,8 +921,9 @@ callout: every float tensor cast to fp16, no `audio_max_length`, `max_new_tokens
 | lecture 45:00 (has proper nouns) | 158 | **5 (3.2%)** | **4** — `Korshesney` ×2, `Korshane`, `Brooklyn.`; residue: `Okay.` |
 | proseminar 11:30 (no proper nouns) | 264 | **8 (3.0%)** | **0** — `and`, `a`, `had`, `them's` ×2, `You're`, `Like`, `be` |
 
-Every garble of the probe name was flagged, with no glossary — that is D18 working. And the
-residue has a shape: **all eight false flags on the second window sit next to a disfluency**
+Every garble of the probe name was flagged, with no glossary — *in the spike*; the corrected
+three-dissenter run below flags two of the name's four occurrences, because Parakeet agrees
+with CrisperWhisper on `Korshane`. And the residue has a shape: **all eight false flags on the second window sit next to a disfluency**
 — `a` beside `d- d-`, `had` between `[UM]` and `[UH]`, `Like` after `[laughter]`, `You're` in a
 `You're you are` repair, `them's` a contraction the fluent view did not expand. The fluent
 view drops the disfluency but the dissenters also drop or reshape the word *beside* it. Two
@@ -930,23 +931,31 @@ cheap refinements for `annotate.py`, measured below: **mask tokens adjacent to a
 or partial**, and expand `'s` contractions on pronouns (`them's` → `them is`) as `gonna` already
 is.
 
-**Both refinements measured** (re-analysis of the spike outputs, no GPU; TDT via 30 s windows):
+**Both refinements measured, then corrected.** A first re-analysis of the spike outputs put
+residue at 0.95% with recall 5/5 on the lecture window. Half of that was wrong: the spike
+script wrote both windows' 30 s Parakeet output to one file, so the lecture window was scored
+against the *proseminar's* Parakeet text — which disagreed with everything and quietly reduced
+the lecture window to a two-dissenter conjunction. Re-run through the real pipeline (job 48749,
+ARK fixed, Parakeet correct):
 
-| fluent view | lecture 45:00: flagged / real / residue | proseminar 11:30: flagged / real / residue | residue over both |
-|---|---|---|---|
-| §7b rules as written | 6 / 5 / 1 (`Okay.`) | 8 / 0 / 8 | 9 of 422 = **2.1%** |
-| + pronoun `'s` expansion | 6 / 5 / 1 | 6 / 0 / 6 | 1.7% |
-| + adjacency mask | 5 / 4 / 1 | 5 / 0 / 5 | 1.4% |
-| **+ both** | **5 / 4 / 1** | **3 / 0 / 3** (`and`, `You're`, `be`) | **4 of 422 = 0.95%** |
+| window | fluent tokens | flagged | real | residue |
+|---|---|---|---|---|
+| lecture 45:00, three dissenters, pipeline | 165 | **4 (2.4%)** | **3** — `Korshesney` ×2, `Brooklyn.` | 1 — `Okay.` |
+| proseminar 11:30, three dissenters, spike (its Parakeet file was the correct one) | 264 | **3 (1.1%)** with both refinements | 0 | 3 — `and`, `You're`, `be` |
 
-So the ~1% is real for a CrisperWhisper primary once the two refinements are on — and it is a
-trade, not a free lunch: the mask hides one true garble on the lecture window, the `Korshane`
-that happens to sit beside an `[UH]`. Three of the name's four garbles are still flagged, which
-is enough for a coder to see it is suspect. Both refinements are flags in `annotate.py`, on by
-default, so the trade is re-measurable without a GPU. The three residual false flags are a
-repair the fluent view does not collapse (`You're you are`), a discourse marker (`Okay.`), and
-a token at the window's edge (`be`) — the last an artefact of cutting 90 s clips, which an
-80-minute run does not have.
+Residue over both: **4 of 429 fluent tokens, 0.9%.** Recall on the probe name: **two of its
+four occurrences, plus `Brooklyn.`** The two `Korshane` occurrences are unflagged because
+**Parakeet independently produced `Korshane`** — it missed only 4 of 165 tokens on this window
+— and the conjunction withholds a flag when any dissenter agrees. That is the rule working as
+D18 states it, and the honest cost of requiring unanimity: a spelling that is phonetically
+natural can be reached by two lineages at once. A coder still sees the name flagged twice on
+the page.
+
+The adjacency mask's exemption for capitalised mid-sentence tokens stays as the rule (it is
+what keeps `Eric Korshane [UH]`-shaped tokens flaggable), but on this window its measured
+benefit is nil: no candidate sat beside a marker once Parakeet was scored correctly. Both
+refinements and the exemption are flags in `annotate.py`, on by default, re-measurable in a
+second.
 
 Cost is far below the earlier ~40% estimate: ARK ~17–22×, TDT ~100×, CTC ~675× realtime
 against CrisperWhisper's ~33×, so all three add roughly **+8%** to a run (ARK dominates).
@@ -970,6 +979,15 @@ python src/annotate.py transcripts/x_raw.json --dissenters transcripts/x_job*_ra
 python src/render.py transcripts/x_annotated.json --profile coding       # candidates print as  word [NAME?]
 ```
 
+Verified end to end on the A100 (job 48749): three dissenter records through
+`transcribe_audio.py` (157 / 159 / 166 tokens, each carrying the not-built-aligner warning),
+`annotate.py` against the CrisperWhisper primary, `render.py --profile coding` — and
+`Korshesney [NAME?]` twice and `Brooklyn. [NAME?]` on the page. The first run through the
+adapter had ARK emit zero words and exit 0 (the card wants a file path, the adapter passed an
+array); a dissenter adapter now fails the run on an empty transcript, and `annotate.py`
+refuses a dissenter with under a quarter of the primary's tokens, since it would vote against
+everything and the conjunction would quietly become a vote of the rest.
+
 The dissenters are separate runs because they cannot share a process with the primary:
 CrisperWhisper lives in `cw2diar`, these need `transformers` 5.16. That also happens to be what
 D1 wants — change the masking rule and `annotate.py` re-runs in a second with no GPU. The
@@ -980,9 +998,12 @@ revision; the flag is `proper_noun_candidate`, on the primary and the secondary 
 partial is masked — that removes the residue — but hesitation precedes retrieval of a hard
 name (`Eric Korshane [UH]` is the canonical shape), so the mask would hide exactly the tokens the
 detector exists for. Exemption: a **capitalised, non-sentence-initial** token is never masked.
-On the spike data that keeps `Korshane` and still masks `a`, `had`, `Like`: recall 5/5 on the
-name-dense window, residue 4 of 422. What the mask can still hide is a *lowercase* garble
-beside a marker (`psychatology`-class technical terms), which is the residual risk.
+On the proseminar window it masks `a`, `had`, `Like` and keeps nothing it should not; on the
+lecture window, scored correctly, no candidate sits beside a marker, so the exemption costs and
+saves nothing there. What the mask can still hide is a *lowercase* garble beside a marker
+(`psychatology`-class technical terms), which is the residual risk. And what no mask affects:
+a garble two lineages reach independently (`Korshane`) is not flagged at all — the price of
+unanimity.
 
 ---
 
