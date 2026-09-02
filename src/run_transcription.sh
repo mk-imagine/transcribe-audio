@@ -49,11 +49,16 @@ if [ -z "$AUDIO_FILE" ] || [ -z "$OUTPUT_DIR" ]; then
     usage
 fi
 
-# Get the absolute path of the directory containing this script (src/)
+# Absolute paths to this script's directory (src/) and the repo root, so the
+# wrapper works from any working directory. Every path below is derived from
+# these -- previously the sbatch file, the log directory and the pipeline were
+# all named relatively, so the wrapper only worked when run from inside src/.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+REPO_ROOT="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
+LOG_DIR="$REPO_ROOT/hpc/logs"
 
-# heck for .env in the parent of the script directory (Project Root)
-if [ -z "$HF_TOKEN" ] && [ ! -f "$SCRIPT_DIR/../.env" ]; then
+# Check for .env in the repo root
+if [ -z "$HF_TOKEN" ] && [ ! -f "$REPO_ROOT/.env" ]; then
     echo "WARNING: HF_TOKEN variable not set and no .env file found in project root."
     echo "         Diarization will likely fail."
 fi
@@ -87,17 +92,20 @@ if [ -n "$MODEL" ]; then
     EXTRA_FLAGS="$EXTRA_FLAGS --model $MODEL"
 fi
 
-mkdir -p logs
+mkdir -p "$LOG_DIR"
 mkdir -p "$OUTPUT_DIR"
 
 # Submit
 echo "Mamba environment: $CONDA_ENV"
 [ -n "$MODEL" ] && echo "Model: $MODEL"
 
+echo "Logs: $LOG_DIR"
+
 sbatch \
-    --export=ALL,TRANSCRIBE_ENV="$CONDA_ENV" \
+    --export=ALL,TRANSCRIBE_ENV="$CONDA_ENV",REPO_ROOT="$REPO_ROOT" \
+    --output="$LOG_DIR/transcribe_%j.log" \
     --partition=$PARTITION \
     --cpus-per-task=$CPUS \
     --time=$TIME_LIMIT \
     $GRES_FLAG \
-    transcribe.slurm "$AUDIO_FILE" "$OUTPUT_DIR" "$CLEAN_MODE" "" "$EXTRA_FLAGS"
+    "$SCRIPT_DIR/transcribe.slurm" "$AUDIO_FILE" "$OUTPUT_DIR" "$CLEAN_MODE" "" "$EXTRA_FLAGS"
