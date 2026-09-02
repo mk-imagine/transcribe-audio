@@ -106,7 +106,7 @@ Settled. Each entry records what would reopen it.
 > | model | generic assumption | what the docs said | cost |
 > |---|---|---|---|
 > | CrisperWhisper 2 | `transformers.pipeline` | package exposes `mode="verbatim"`, absent from the pipeline | benchmarked as emitting **zero** disfluencies; drove a ten-model search and a fine-tuning plan that were unnecessary |
-> | ARK-ASR-0.6B | cast every float tensor to fp16, feed 90 s | cast **only** `inputs["audios"]`; `audio_max_length=30*16000`; `do_sample=False`; `bad_words_ids` | output collapsed into repeated CJK characters; nearly discarded a working model |
+> | ARK-ASR-0.6B | cast every float tensor to fp16, feed 90 s | cast **only** `inputs["audios"]`; `audio_max_length=30*16000`; `do_sample=False`; `bad_words_ids` | output collapsed into repeated CJK characters; nearly discarded a working model. Card script re-verified 2026-09-01 (§7b) |
 > | CTC models (Parakeet, Granite TurboCTC) | reuse the seq2seq `chunk_length_s` | CTC is frame-synchronous and needs no chunking | silently returned ~12% of the content (63 words where the reference was 545) |
 >
 > The tell in all three: output that is *plausible but wrong in a way no error message
@@ -885,6 +885,54 @@ to take from every dual-stream run and is worth keeping as evidence, but it does
 spelling on its own.
 
 Cost: ~78% on top of a Qwen primary, ~40% on top of CW2. Batch-only.
+
+#### Dissenters spike (2026-09-01, A100, `audio-transcribe-tf5`, job 48746)
+
+Do the three still run *correctly*, and does the conjunction reproduce the earlier
+measurement? Each runner follows its model card (D19); the invocations this project had
+already got wrong once are the point of checking.
+
+| dissenter | invocation that works | words, 45:00 | RTFx | unmatched vs. primary |
+|---|---|---|---|---|
+| `Audio8/ARK-ASR-0.6B` | card script: `AutoModelForCausalLM` + `trust_remote_code`, fp16, **cast only `inputs["audios"]`**, `audio_max_length=30·16000`, `do_sample=False`, `bad_words_ids`; **30 s clips** | 157 | 17 | 3.8% |
+| `nvidia/parakeet-tdt-0.6b-v3` | card: `AutoModelForTDT`, unchunked — but see below | 141 → **159 in 30 s windows** | 113 | 13.3% → lower |
+| `ibm-granite/granite-speech-5.0-470m-turboctc` | card: `AutoModelForCTC`, **unchunked** (chunked: 68 words — bug 14) | 166 | 677 | 11.4% |
+
+Reference for that window: CrisperWhisper 166 verbatim / 154 intended; Granite 4.1 ASR 158.
+
+**Parakeet's transformers port needs 30 s windows, no overlap.** Unchunked on 90 s it returned
+141 words on the lecture window (143 in 45 s sub-windows, **159 in 30 s** — matching the
+reference) but a correct 264 on the proseminar window, so the drop is input-dependent, not
+a fixed cap. The 210 recorded earlier for the same window was `chunk_length_s=30` with the
+pipeline's stride duplicating words at every boundary. Neither the card's NeMo long-form
+(local attention, 24 min) nor its streaming script applies to the port. Rule: ≤30 s windows,
+like ARK; a transducer needs no overlap.
+
+**ARK's `牵牵牵` collapse is in `hpc/logs/ark_48646.log`** for anyone who doubts the §3
+callout: every float tensor cast to fp16, no `audio_max_length`, `max_new_tokens=600`.
+
+**The conjunction, on both windows:**
+
+| window | primary fluent tokens | flagged | of which real garbles |
+|---|---|---|---|
+| lecture 45:00 (has proper nouns) | 158 | **5 (3.2%)** | **4** — `Korshesney` ×2, `Korshane`, `Brooklyn.`; residue: `Okay.` |
+| proseminar 11:30 (no proper nouns) | 264 | **8 (3.0%)** | **0** — `and`, `a`, `had`, `them's` ×2, `You're`, `Like`, `be` |
+
+Every garble of the probe name was flagged, with no glossary — that is D18 working. And the
+residue has a shape: **all eight false flags on the second window sit next to a disfluency**
+— `a` beside `d- d-`, `had` between `[UM]` and `[UH]`, `Like` after `[laughter]`, `You're` in a
+`You're you are` repair, `them's` a contraction the fluent view did not expand. The fluent
+view drops the disfluency but the dissenters also drop or reshape the word *beside* it. Two
+cheap refinements for `annotate.py`, to be measured, not assumed: **mask tokens adjacent to a
+dropped marker or partial** (would remove six of the eight), and expand `'s` contractions on
+pronouns (`them's` → `them is`) as `gonna` already is.
+
+Cost is far below the earlier ~40% estimate: ARK ~17–22×, TDT ~100×, CTC ~675× realtime
+against CrisperWhisper's ~33×, so all three add roughly **+8%** to a run (ARK dominates).
+
+The script that produced the earlier 0.8%/2.0% figures was not in `hpc/jobs/` — an ad-hoc
+login-node run — so these rates stand on their own rather than as a replication; the fluent
+view here is written from this section's rules.
 
 ---
 
