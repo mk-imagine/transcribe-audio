@@ -268,6 +268,9 @@ def _source_block(args, processed: Path, duration: float) -> Dict[str, Any]:
         "audio_sha256": provenance.sha256_file(original),
         "duration_s": round(duration, 3),
     }
+    if getattr(args, "transcoded_from", None):
+        block["transcoded"] = {"from": args.transcoded_from, "to": "pcm_s16le wav, one decode",
+                               "why": "compressed sources are re-decoded per window by seeking readers (bug 9)"}
     if getattr(args, "start_time", None):
         block["excerpt"] = {
             "start_time": args.start_time,

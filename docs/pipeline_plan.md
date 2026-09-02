@@ -241,7 +241,10 @@ categories appear in real output:
 | `vocalization` | 1 | `[laughter]` — **lowercase**, unlike `[UH]`/`[UM]`; match tags case-insensitively |
 
 Tag inventory over those 12 windows is exactly `{uh: 83, um: 38, laughter: 1}`. Vocalizations
-are supported but rare in this material; an uppercase-only regex will miss them.
+are supported but rare in this material; an uppercase-only regex will miss them. Two full
+lectures on 2026-09-02 added `[throatclearing]` and `[lipsmack]` — first caught as
+`unknown_marker` by the guard, then added to the vocalization set. The inventory is open-ended;
+the guard is what keeps a new tag from passing as speech.
 
 `word_timestamps=True` and the markers coexist. `temperature_fallback=True` is
 on by default and no looping was observed (0.0% duplicate 8-grams on all 12 windows).
@@ -1211,6 +1214,7 @@ reading source.
 | 5 | Chunks that cleaned to empty were `continue`d | Punched silent holes in the timeline. Moot: nothing is dropped from the record |
 | 6 | `_adjust_timestamps` used the absolute `end_time` as the fallback for a missing relative end | Invented a timestamp and hid the gap from everything downstream. A missing bound now stays `None` |
 | 7 | `TranscriberFactory` substring-sniffed model names | `"crisper" in name` routed **v1** into the v2 path, where `--mode`/`--hotwords` are ignored and the run exits 0. `"mlx" in name` and `"granite-speech" in name` still referenced classes deleted in e0e2542, so either id raised `NameError`. Replaced by the registry |
+| 9 | A compressed source was re-decoded from byte zero by every seeking reader | First measured as a 1.6× penalty on chunked models; then, 2026-09-02, **pyannote on a 79-minute `.m4a` had not finished after 45 minutes** (0% GPU: decoding per sliding window) where the same pipeline diarized a 94-minute `.wav` in minutes. Fixed at the boundary: stage 1 decodes any non-PCM source **once** to a temporary `.wav` before anything reads it, records the fact in `source.transcoded`, and still names and hashes the original |
 | 17 | The MLX path survived D13 | Deleted, with `src/transcribe_audio_mac.py` and MPS device selection. The chunk-level pin it motivated went in e0e2542; the surviving `--timestamp_mode` flag is generic-Whisper-only and has its own justification (`docs/environments.md`), so it is kept and recorded as `asr.granularity` |
 
 **The recurring shape:** a module-scope import of an optional dependency (15), a silent
@@ -1221,17 +1225,11 @@ trusting its name, and put every caveat in the output file instead of a job log.
 
 ### Outstanding
 
-Bugs 3 and 9 both live in `src/pipeline/chunking.py` now, documented in its module
-docstring. Neither is fixable without a real `needs_chunking` model to verify against,
-which arrives in Phase 3.
+Bug 3 lives in `src/pipeline/chunking.py`, documented in its module docstring; it needs a real
+`needs_chunking` model to verify a fix against.
 
 3. Fixed 300 s boundaries cut mid-word. Bypassed for CrisperWhisper (native long-form) but
    still applies to any `needs_chunking` model, which should split on silence.
-9. Per-segment `librosa.load(path, offset=...)` re-decodes a compressed source from byte zero.
-   Measured wall-to-wall: 79 min of `.m4a` took **91 min** against **57 min** for the same
-   audio as `.wav` — a **1.6x penalty** for 3.6 s of ffmpeg. Bypassed for CrisperWhisper,
-   still live for chunked models. *(An earlier draft said ~4x; that compared a
-   transcription-only rate against a wall time including diarization.)*
 14. CTC models must **not** be given `chunk_length_s` — not a bug in this code, a calling
     rule. On 300 s where the reference is 545 words, `parakeet-ctc-0.6b` returned 63 chunked
     and 566 unchunked; `granite-470m-turboctc` 68 against 581. Chunking discards ~88% of the
@@ -1246,7 +1244,7 @@ which arrives in Phase 3.
 | **Granite timestamp + speaker mode combination** | **Resolved 2026-09-01: they do not combine.** A fused prompt yields timestamp output with no attribution (§3). The adapter runs two passes per window and aligns them. |
 | **Coding margin layout** | **Resolved 2026-09-01: right-hand column (D23).** Reopens the moment a coder asks for something else. |
 | **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
-| **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (proseminar) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
+| **Diarization speaker count — and time — grow with duration** | **Measured on full lectures 2026-09-02.** community-1 on 79 min: 4 labels, 422 turns, ~10 min of wall time; on 94 min: 2 labels, 670 turns; on **145 min: 13 labels, 1,641 turns, 31 minutes of wall time at 0% GPU** — one label holds 99 of the 145 minutes and twelve share the rest. Clustering cost is superlinear in the number of embeddings, and the tail of small labels is fragmentation, not twelve people. The render-time speaker map can fold them, but thirteen is a lot to map by hand. Next small feature: a `--max_speakers` passthrough to the pipeline (pyannote accepts `num_speakers` / `min_speakers` / `max_speakers` at call time — verify on 4.0.3 before wiring, D19), which bounds both the label count and the clustering time. Still unverified against the audio. |
 | **Diarization model choice** | **Settled 2026-08-31: stay on community-1.** DiariZen v1/v2 benchmarked against it on 10 min excerpts: same speaker counts, near-identical speech totals and runtime (~12 s), 20% fewer/longer segments on the lecture. Not enough to justify its install — a separate env pinned to torch 2.1.1, a vendored pyannote fork, and an `LD_LIBRARY_PATH` workaround for a Rocky 8 `libstdc++` mismatch. Both DiariZen checkpoints are CC-BY-NC; community-1 is CC-BY-4.0. No DER computed: no reference labels. |
 | **Fine-tuning for disfluencies** | **Dropped 2026-08-31.** Premised on no accurate model emitting disfluencies, which was an artefact of calling CrisperWhisper through `transformers.pipeline`. `mode="verbatim"` supplies them natively. The teacher-forced groundwork (Qwen3-ASR sits at ~1% filler probability against CW2's ~0.1%) is recorded in case the premise returns. |
 | **Vocalization coverage** | Only `[laughter]`, once, in 12 windows of lecture + proseminar audio. Whether CW2 tags coughs/breaths is untested — this material may simply contain none. |

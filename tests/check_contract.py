@@ -459,6 +459,35 @@ def _():
         assert not plan_for(c, mode="verbatim").ok
 
 
+# ------------------------------------------------------------ decode once ----
+
+@check("a compressed source is decoded once at the boundary; PCM containers pass through")
+def _():
+    sys.path.insert(0, str(ROOT / "src"))
+    import transcribe_audio as ta
+    from pathlib import Path as P
+    for ext in (".m4a", ".mp3", ".aac", ".ogg", ".M4A"):
+        assert ta.needs_transcode(P(f"x{ext}")), ext
+    for ext in (".wav", ".WAV", ".flac"):
+        assert not ta.needs_transcode(P(f"x{ext}")), ext
+    # the source block records the decode, keyed on the original suffix
+    from pipeline.orchestrator import _source_block
+    with tempfile.TemporaryDirectory() as td:
+        wav = Path(td) / "temp_decoded_x.wav"; _silence(wav, 2)
+        a = _Args(model="mock/start-end", input_path=str(wav), source_path=str(Path(td) / "x.m4a"))
+        a.transcoded_from = ".m4a"
+        (Path(td) / "x.m4a").write_bytes(b"not really audio")
+        blk = _source_block(a, wav, 2.0)
+        assert blk["audio_path"].endswith("x.m4a") and blk["transcoded"]["from"] == ".m4a"
+
+
+@check("the two new vocalization tags are recognised; an unseen one is still flagged unknown")
+def _():
+    assert flags.tag("[throatclearing]") == ("vocalization",)
+    assert flags.tag("[lipsmack]") == ("vocalization",)
+    assert flags.tag("[zzzt]") == ("unknown_marker",)
+
+
 # ---------------------------------------------------------- granite parsing --
 
 @check("Granite timestamps unwrap across the 10-second rollover, per the card's algorithm")

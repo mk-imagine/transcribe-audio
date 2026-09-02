@@ -62,12 +62,27 @@ def _load_env() -> None:
     logger.info("Loaded .env from: %s", env_path)
 
 
+#: Containers soundfile reads with random access. Anything else is decoded
+#: once, up front, to PCM -- bug 9: a compressed source has no random access,
+#: so every reader that seeks (librosa per window, pyannote per sliding window)
+#: re-decodes it from byte zero. Measured on a 79-minute .m4a: CrisperWhisper
+#: took 3 minutes, and pyannote had not finished after 45.
+PCM_SUFFIXES = {".wav", ".flac", ".aiff", ".aif"}
+
+
+def needs_transcode(path: Path) -> bool:
+    return path.suffix.lower() not in PCM_SUFFIXES
+
+
 class AudioHandler:
-    """Cuts a working excerpt with ffmpeg when --start_time is given."""
+    """Hands every later stage a PCM .wav: an excerpt when --start_time is
+    given, a one-time decode when the source is compressed, the file itself
+    otherwise."""
 
     def __init__(self, output_dir: Path):
         self.output_dir = output_dir
         self.temp_files: List[Path] = []
+        self.transcoded_from: Optional[str] = None
 
     def prepare_segment(self, input_path: Path, start: Optional[str],
                         end: Optional[str]) -> Path:
@@ -75,16 +90,24 @@ class AudioHandler:
             raise IsADirectoryError(f"Input path is a directory: {input_path}")
         if not input_path.exists():
             raise FileNotFoundError(f"Audio file not found: {input_path}")
-        if not start:
+        transcode = needs_transcode(input_path)
+        if not start and not transcode:
             return input_path
 
-        # Always a .wav container: the segment is re-encoded as PCM s16le, and
-        # reusing the source suffix wrote PCM into e.g. .m4a, which the MP4
-        # muxer rejects outright.
-        temp_path = self.output_dir / f"temp_segment_{start.replace(':', '')}_{input_path.stem}.wav"
-        logger.info("Creating temporary audio segment: %s to %s...", start, end or "EOF")
+        # Always a .wav container: the output is PCM s16le, and reusing the
+        # source suffix wrote PCM into e.g. .m4a, which the MP4 muxer rejects.
+        tag = f"segment_{start.replace(':', '')}" if start else "decoded"
+        temp_path = self.output_dir / f"temp_{tag}_{input_path.stem}.wav"
+        if start:
+            logger.info("Creating temporary audio segment: %s to %s...", start, end or "EOF")
+        else:
+            logger.info("Decoding %s to PCM once, so no reader re-decodes it per window (bug 9)...",
+                        input_path.suffix)
+            self.transcoded_from = input_path.suffix.lower()
 
-        command = ["ffmpeg", "-y", "-i", str(input_path), "-ss", str(start)]
+        command = ["ffmpeg", "-y", "-i", str(input_path)]
+        if start:
+            command += ["-ss", str(start)]
         if end:
             command += ["-to", str(end)]
         command += ["-c:a", "pcm_s16le", str(temp_path)]
@@ -224,11 +247,12 @@ def main() -> None:
 
     try:
         # The record names the original audio; input_path becomes the working
-        # excerpt, which is deleted when the run ends.
+        # excerpt or decode, which is deleted when the run ends.
         args.source_path = args.input_path
         args.input_path = str(
             handler.prepare_segment(Path(args.input_path), args.start_time, args.end_time)
         )
+        args.transcoded_from = handler.transcoded_from
         try:
             doc = transcribe(args)
         except (UnknownModelError, UnsupportedModelError, CapabilityConflict) as exc:
