@@ -421,7 +421,7 @@ src/
       [x] crisperwhisper2.py
       [x] whisper.py           # generic openai/whisper-* only
       [x] mock.py              # six capability-declaring fakes, no weights
-      [ ] granite41plus.py     # Phase 3
+      [x] granite41plus.py     # two passes per 200 s window, aligned (Phase 3)
     [x] chunking.py            # fixed-window segmentation + retry by subdivision
     [x] flags.py               # filled_pause / vocalization / partial_word tagging
     [x] diarize.py             # pyannote wrapper
@@ -899,6 +899,37 @@ print CSS, speaker map file, `txt`/`plain`/`html`. Developed entirely against `g
 
 Granite 4.1-plus. Exercises `end_only` timestamps, silence tokens and native speaker labels,
 proving the contract holds rather than having been written around one model.
+
+**Done (2026-09-01).** `src/pipeline/adapters/granite41plus.py`, registered; verified through
+the real pipeline on the A100 (`audio-transcribe-tf5`, `251211_0009.wav`):
+
+| | A — 11:30–13:00, one window | B — 11:00–16:00, two windows |
+|---|---|---|
+| tokens (spoken + silence) | 268 + 45 | 936 + 148 |
+| every `start` = previous token's `end` | yes | yes |
+| ends monotonic after unwrap | yes | yes |
+| turns / labels | 3 — `Speaker 1`, `Speaker 2` | 6 — `w1:Speaker 1/2`, `w2:Speaker 1/2` |
+| `diarization` block | the model's own SAA pass, `source: asr` | same |
+| words carrying a speaker | 0 — assigned in stage 2 (D3) | 0 |
+| realtime factor, both passes | 2.2 | 2.2 |
+| exit / `validate()` | 0 / clean | 0 / clean |
+
+The plan line the orchestrator logged is the whole point of the phase:
+`chunking=True derive_starts=True forced_alignment=False diarizer=False timing=derived` —
+three paths CrisperWhisper never takes, dispatched from the registry declaration alone.
+
+What the spike forced (§3): the timestamp and speaker modes do not combine, so the adapter
+runs **two passes per 200 s window** and aligns them by token sequence; the SAA turns land in
+`speaker_turns`, where stage 2 treats them like pyannote's. Speaker numbers restart per
+window, so multi-window labels are namespaced and the record says so in `warnings`; the
+render-time speaker map merges them. At 2.2× realtime an 80-minute file is ~36 minutes of
+A100 — fine for a contract-proving adapter; CrisperWhisper remains the production model (D4).
+
+**Follow-ups, not blockers:** the stage-2 renderer must drop `silence` tokens before
+segmentation (they would bridge every pause the pause rule looks for) — it lands once the
+renderer PR is merged. And a sliding-window variant of the card's incremental decoding, with
+`prefix_text` carrying the previous window's tail, might keep speaker numbers consistent
+across windows; unverified, a spike item.
 
 ### Phase 4 — Benchmark *(only if needed)*
 

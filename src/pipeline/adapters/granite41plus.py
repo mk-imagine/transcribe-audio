@@ -321,7 +321,7 @@ class Granite41PlusAdapter(Adapter):
             labels = [f"w{k}:{lab}" for lab in labels]
         for t in turns_from_labels(words, labels):
             self._turns.append({"start": t["start"] + start, "end": t["end"] + start, "speaker": t["speaker"]})
-        logger.info("Window %.0f-%.0fs: %d tokens (%d silences), %d turn(s), %.1fs",
+        logger.info("Window %.0f-%.0fs: %d tokens (%d silences), %d speaker(s), %.1fs",
                     start, end, len(words), sum(1 for w in words if "silence" in w.flags),
-                    len({t["speaker"] for t in self._turns[-len(labels):]}), dt)
+                    len(set(labels)), dt)
         return words
