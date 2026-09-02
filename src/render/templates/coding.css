@@ -1,0 +1,28 @@
+/* Coding profile: verbatim stream, numbered sentences, wide right-hand margin
+   for handwritten codes (D23), and no page break inside a turn. */
+@page {
+  size: letter;
+  /* top right bottom left -- the 2.75in right margin is the coding column */
+  margin: 0.9in 2.75in 0.9in 0.9in;
+}
+body { counter-reset: line; }
+main { padding-right: 0; }
+p.line {
+  position: relative; padding-left: 3.2em; margin-bottom: .18em;
+  line-height: 1.55;               /* room for a tick mark, not for prose between lines */
+}
+p.line::before {
+  counter-increment: line; content: counter(line);
+  position: absolute; left: 0; width: 2.6em; text-align: right;
+  font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 8pt; color: var(--muted);
+  top: .25em;
+}
+section.turn { break-inside: avoid; page-break-inside: avoid; }
+/* On screen, show the coding column so the print layout is visible before printing. */
+@media screen {
+  body { max-width: 8.5in; margin: 0 auto; padding: 0.9in 2.75in 0.9in 0.9in; box-shadow: 0 0 0 1px var(--rule); }
+  body::after {
+    content: "coding margin"; position: fixed; right: 0; top: 50%; transform: rotate(90deg) translate(50%, -50%);
+    font-family: ui-monospace, monospace; font-size: 8pt; color: var(--rule); letter-spacing: .3em;
+  }
+}

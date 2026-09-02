@@ -70,6 +70,7 @@ Settled. Each entry records what would reopen it.
 | D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
 | D20 | **Use `mamba` for all environment management, never `conda`.** | Faster resolution, and `src/transcribe.slurm` already activates through it — mixing the two invites drift between what a job activates and what was built. Build fresh rather than `--clone`: clones hardlink, so pip in a clone can strip packages from the source env. | — |
 | D21 | **Hotwords are a declared capability, and the standard CrisperWhisper 2 checkpoints declare `untrained`.** | Hotword boosting is trained into the Pro checkpoints only. On a standard checkpoint the package accepts the argument, raises a `UserWarning` and can *degrade* transcription -- measured, it did (§3). A run may still pass them; it warns, and the warning is written into the record. | Nyra documents hotword training for the standard weights, or a Pro licence is bought |
+| D23 | **The coding margin is a right-hand column.** | Decided 2026-09-01 without polling the coders: a wide right margin is the conventional layout for handwritten codes on a printed transcript, it is a five-minute CSS change either way, and deciding it lets Phase 2 proceed. | The student coders ask for double-spaced lines to write between instead — or anything else. **Explicitly not a point of no return.** |
 | ~~D22~~ | **Withdrawn 2026-09-01, the same day it was added.** It claimed proper-noun spelling should come from the `intended` stream. The measurement behind it was wrong (§3): a substring regex scored `Courchesney` as a match for `Courchesne`. The number is not reused; the open question is tracked in §10. | — | — |
 | D19 | **Read the model's own docs before writing an integration; never assume a generic loader is correct.** | A generic loader that runs is not evidence it runs correctly — the failure is silent and produces self-consistent wrong measurements. See the callout at the head of §3 for three worked instances. | — |
 | D18 | **Proper-noun detection by three-dissenter conjunction (§7b), compared on a fluent view.** | Glossaries cannot be built ahead of an arbitrary lecture, but cross-model disagreement localises garbles without one. Dissenters must come from independent lineages. | A single model gains reliable proper-noun accuracy |
@@ -351,7 +352,7 @@ Anything recomputable from data is recomputed in stage 2.
 src/
   [x] transcribe_audio.py      # stage 1 CLI (keeps its name: the SLURM wrappers call it)
   [ ] annotate.py              # stage 1.5 CLI
-  [ ] render.py                # stage 2 CLI
+  [x] render.py                # stage 2 CLI
   pipeline/
     [x] capabilities.py        # Capabilities, ModelSpec, plan_for()
     [x] registry.py            # REGISTRY: model_id -> ModelSpec, exact match only
@@ -369,10 +370,20 @@ src/
     [x] orchestrator.py        # dispatch from the declaration; assembles the record
     [x] preview.py             # stage-1 text preview, superseded by render.py
     [ ] align.py               # forced-alignment gap-filler
-  [ ] render/                  # Phase 2: segment, speakers, formats, templates
+  render/
+    [x] __init__.py            # RWord, Sentence, Turn, Profile, PROFILES, stream selection
+    [x] speakers.py            # max-overlap assignment, island smoothing, name map
+    [x] segment.py             # sentences, turns, within-turn anchors
+    [x] stamp.py               # the version stamp every render carries
+    formats/
+      [x] txt.py  plain.py  html.py
+      [ ] tex.py               # optional (D11); not built
+    templates/
+      [x] base.css  coding.css  lecture.css
 tests/
-  [x] check_contract.py        # 31 dependency-free checks
-  [ ] fixtures/golden.json     # committed; renderer tests need no models
+  [x] check_contract.py        # 41 dependency-free checks: stage 1 dispatch + the fixture
+  [x] check_render.py          # 21 dependency-free checks: stage 2 against the fixture
+  [x] fixtures/golden.json     # committed; renderer tests need no models
 ```
 
 ### CLI shapes
@@ -567,7 +578,7 @@ detector — repurposed from **deleter to tagger**.
 
 Two ~80 min recordings, CrisperWhisper word-level timestamps on an A100, `--clean_mode none`:
 
-| Signal | Interview (14,709 w, 182 wpm) | Lecture (11,588 w, 147 wpm) |
+| Signal | Proseminar, guest + host (14,709 w, 182 wpm) | Lecture (11,588 w, 147 wpm) |
 |---|---|---|
 | terminal punctuation | every 4.7 s | every 7.0 s |
 | pause > 0.2 s | every 2.8 s | every 2.8 s |
@@ -578,14 +589,31 @@ Two ~80 min recordings, CrisperWhisper word-level timestamps on an A100, `--clea
 **Punctuation is not sparse.** It alone yields a sentence every 4.7–7.0 s, so it is the primary
 signal and the pause rule supplements it — the reverse of what was assumed here previously.
 
-**Provisional default: `--pause-threshold 0.3`.** Both recordings agree closely despite
-differing genre and speech rate; 0.2 s fragments sentences, 0.5 s merges them.
+~~**Provisional default: `--pause-threshold 0.3`.**~~ Superseded below.
 
-**Do not harden that number yet.** 59% of inter-word gaps are exactly 0.000 s in both files —
-an artifact of `_adjust_pauses` (bug 8), which collapses every gap below `split_threshold`
-(0.12 s) and shortens the rest by the same amount. The 0.3 s figure is measured against
-already-distorted data and corresponds to roughly 0.42 s of real silence. Re-derive it once
-pause adjustment moves to stage 2.
+#### Re-derived on raw timestamps (2026-09-01)
+
+Bug 8 is fixed and the fixture carries raw CrisperWhisper timestamps, so the number above
+was re-measured. Two findings.
+
+**The 0.000 s gaps were not bug 8.** 72% of inter-word gaps in the fixture are exactly zero
+with no pause adjustment anywhere in the path. That is the Viterbi aligner's nature — it
+partitions the timeline, so a word's end is usually the next word's start — not an artefact.
+The earlier attribution to `_adjust_pauses` was at most half right.
+
+**0.5 s, not 0.3.** On the 10-minute fixture (182 wpm):
+
+| threshold | pause boundaries | one every |
+|---|---|---|
+| 0.3 s | 256 | 2.3 s — fragments |
+| **0.5 s** | **126** | **4.8 s** |
+| 0.75 s | 58 | 10.3 s |
+| terminal punctuation | 114 | 5.3 s |
+
+At 0.3 s the pause rule fires twice as often as punctuation and splits mid-phrase; at 0.5 s
+it matches punctuation's cadence and supplements it. **`--pause-threshold 0.5` is the
+default.** Still a flag; re-rendering is instant, and `tests/check_render.py` asserts the
+ratio stays within 2× so a future recording that breaks the assumption is noticed.
 
 All thresholds are CLI flags. Re-rendering is instant, so tune them against real transcripts
 rather than guessing up front.
@@ -630,10 +658,22 @@ pyannote emits `SPEAKER_00`. The existing transcript already shows real names be
 ("Dr. Geisler" alongside "Speaker C"), so this step exists informally. Make it an editable map
 file read at render time: identify once, re-render forever, fix a misattribution without a GPU.
 
-### OPEN — layout detail
+**Built (2026-09-01).** `--speaker-map`, a file of `SPEAKER_00: Name` lines, applied after
+assignment and smoothing and before turn grouping; the raw JSON is never touched, and the stamp
+records which file was used and which labels it left unmapped. Three properties worth knowing:
 
-Whether the coding margin should be a right-hand column or double-spaced lines to write
-between. Ask the students who mark these up; it is a five-minute CSS change once known.
+- **It is per-recording by nature.** Labels are numbered by first appearance within one
+  diarizer run, so `SPEAKER_00` in one file is unrelated to `SPEAKER_00` in the next. The
+  convention is a sidecar, `<stem>_speakers.yaml` beside `<stem>_raw.json`, which the renderer
+  picks up automatically; `--no-speaker-map` renders the anonymous labels on purpose.
+- **Two labels may map to one name**, and turn grouping then merges them. That is the fix for
+  the diarizer splitting one person into two labels (three labels on the two-person fixture).
+- Sidecars naming real people are **not committed** alongside a public fixture.
+
+### Layout detail — resolved (D23)
+
+The coding margin is a **right-hand column**. Decided without polling the coders so Phase 2
+can proceed; it is a five-minute CSS change if they ask for double-spaced lines instead.
 
 ---
 
@@ -643,8 +683,9 @@ Most of this pipeline needs no GPU — and no model — at all.
 
 - **Stage 2 is entirely model-free.** Turn grouping, anchors, speaker assignment and smoothing,
   line numbering, print CSS, both profiles, every format backend: a pure function over JSON.
-  Generate one real raw JSON, **commit it as `tests/fixtures/golden.json`**, and renderer
-  development and tests run in milliseconds forever on any machine.
+  **Done 2026-09-01: `tests/fixtures/golden.json`** — 10 min of `251211_0009.wav`, dual-stream,
+  diarized, 1,969 + 1,864 tokens, 59 turns over 3 labels, 61 disfluency flags. See its README
+  for provenance. Renderer development and tests now run in milliseconds on any machine.
 - **Register a `mock` adapter.** It declares `Capabilities` like any other model and returns
   canned words, testing orchestrator dispatch deterministically in CI — including the paths
   hardest to trigger with real models: `end_only` derivation, forced-alignment gap-fill,
@@ -721,6 +762,13 @@ mean it cannot size an A100 request.
 Slice 60–90 s clips (the existing `--start_time` / `--end_time` ffmpeg path does this) and keep
 them as standard fixture inputs. **One interview excerpt and one lecture excerpt** — spontaneous
 dialogue and monologue stress disfluency handling very differently.
+
+> **There is no interview recording in `data/` yet.** `251211_0009.wav` was labelled one here
+> and in `docs/environments.md` until 2026-09-01; it is a proseminar guest lecture with host
+> interaction. The coding profile — the project's primary use case — is therefore being
+> developed against lecture-with-dialogue audio. Get a real participant interview in before
+> Phase 2 is called done: spontaneous two-party dialogue is where turn boundaries, overlap and
+> short filler tokens near speaker changes are hardest, and none of that is represented yet.
 
 ---
 
@@ -834,6 +882,34 @@ as a warning rather than pretending to have timings.
 Speaker assignment with boundary smoothing, turn grouping, within-turn anchors, both profiles,
 print CSS, speaker map file, `txt`/`plain`/`html`. Developed entirely against `golden.json`.
 
+**Done (2026-09-01).** `src/render.py` and `src/render/`, zero dependencies, verified against
+the fixture by 21 checks that run in milliseconds anywhere:
+
+```bash
+python src/render.py transcripts/x_raw.json --profile coding            # txt + html
+python src/render.py transcripts/x_raw.json --profile lecture --format html,plain \
+    --speaker-map x_speakers.yaml --anchor-interval 45
+```
+
+What it does, in order: pick the stream the profile wants (verbatim for coding, intended for
+lecture, with a stamped warning if the record lacks it) → max-overlap speaker assignment with
+nearest-turn fallback for words in diarizer gaps → island smoothing inside pause-bounded runs
+(≤2 words flanked by an agreeing speaker, edges left alone) → name map → sentences
+(punctuation ∨ pause > 0.5 s ∨ speaker change) → turns (consecutive same-speaker sentences:
+the diarizer's 59 segments become 7) → within-turn anchors every 30 s / 60 s snapped to a
+sentence start → txt / plain / html, each carrying the version stamp.
+
+Two things measured on the way. The pause threshold moved to 0.5 s (§6). And timestamps are
+shown in the **original recording's** time: the excerpt offset stage 1 recorded is applied,
+so a coder checking the audio at `00:05:30` finds it there rather than 300 s off.
+
+One wrapping bug caught by the checks and worth remembering: `textwrap` splits on hyphens by
+default, so `self-report` at a line end became `self-` — indistinguishable from a
+`partial_word` in a verbatim transcript. Both text formats now wrap between tokens only.
+
+Not built: `tex` (optional, D11), `docx` (deferred, D16), and `annotate.py` (stage 1.5),
+which is where `repetition`/`repair` tagging goes when a detector is chosen.
+
 ### Phase 3 — Second adapter
 
 Granite 4.1-plus. Exercises `end_only` timestamps, silence tokens and native speaker labels,
@@ -904,41 +980,43 @@ which arrives in Phase 3.
 | Item | Status |
 |---|---|
 | **Granite timestamp + speaker mode combination** | Undocumented. Phase 0 question 2. |
-| **Coding margin layout** | Right-hand column vs. double-spaced. Ask the student coders. |
+| **Coding margin layout** | **Resolved 2026-09-01: right-hand column (D23).** Reopens the moment a coder asks for something else. |
 | **Verbatim punctuation sparsity** | **Resolved 2026-08-28.** Not sparse — a sentence every 4.7–7.0 s across two ~80 min recordings. Punctuation is the primary signal; `pause > 0.3 s` is the provisional default, to be re-derived after bug 8. See §6. |
-| **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (interview) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
+| **Diarization speaker count** | **Partly explained 2026-08-31.** Over 10 min excerpts community-1 gives 2 speakers (lecture) and 4 (proseminar) — plausible. The alarming 10-and-4 counts came from full ~80 min files, so speakers accumulate over duration rather than the model failing outright. Still unverified against the audio. |
 | **Diarization model choice** | **Settled 2026-08-31: stay on community-1.** DiariZen v1/v2 benchmarked against it on 10 min excerpts: same speaker counts, near-identical speech totals and runtime (~12 s), 20% fewer/longer segments on the lecture. Not enough to justify its install — a separate env pinned to torch 2.1.1, a vendored pyannote fork, and an `LD_LIBRARY_PATH` workaround for a Rocky 8 `libstdc++` mismatch. Both DiariZen checkpoints are CC-BY-NC; community-1 is CC-BY-4.0. No DER computed: no reference labels. |
 | **Fine-tuning for disfluencies** | **Dropped 2026-08-31.** Premised on no accurate model emitting disfluencies, which was an artefact of calling CrisperWhisper through `transformers.pipeline`. `mode="verbatim"` supplies them natively. The teacher-forced groundwork (Qwen3-ASR sits at ~1% filler probability against CW2's ~0.1%) is recorded in case the premise returns. |
-| **Vocalization coverage** | Only `[laughter]`, once, in 12 windows of lecture + interview audio. Whether CW2 tags coughs/breaths is untested — this material may simply contain none. |
+| **Vocalization coverage** | Only `[laughter]`, once, in 12 windows of lecture + proseminar audio. Whether CW2 tags coughs/breaths is untested — this material may simply contain none. |
 | **Diarization at turn boundaries** | Short filler tokens near a speaker change are where max-overlap assignment is noisiest; hence smoothing within pause-bounded runs. |
 | **IRB / data governance** | Interview recordings are human-subjects data and stage 1 moves them to shared cluster storage. Assumed covered by the existing protocol; flagged because this pipeline automates the transfer. |
 | **RTX 3070 VM provisioning** | Separate infrastructure task, in progress in another context. Not a blocker (D14). |
-| **Proper nouns: how to resolve a flagged token** | **Opened 2026-09-01, and genuinely open.** On the 45:00 window, `hotwords` produced the only exactly-correct spelling of the probe name and corrupted a neighbouring word doing it; `--mode intended` corrupted nothing and still got the name wrong (`Courchesney` x4). §7b's resolution step therefore has no good default. Worth measuring over the 12-window sweep, comparing **exact token forms**, not substrings: how often does each route land the correct spelling, and how often does hotword biasing damage a non-target token? D21's cost is established; the benefit's reliability is not. |
+| **Proper nouns: how to resolve a flagged token** | **Opened 2026-09-01, and genuinely open.** On the 45:00 window, `hotwords` produced the only exactly-correct spelling of the probe name and corrupted a neighbouring word doing it; `--mode intended` corrupted nothing and still got the name wrong (`Courchesney` x4). §7b's resolution step therefore has no good default. Worth measuring over the 12-window sweep, comparing **exact token forms**, not substrings: how often does each route land the correct spelling, and how often does hotword biasing damage a non-target token? D21's cost is established; the benefit's reliability is not. **Second example, from the first print proof:** `Dr. Geisler` at 14:03 came out `Dreisler` in **both** streams — the intended stream did not help at all this time — and the listener's own judgement was that the name is fast and soft enough to mishear without knowing it. That is the case a glossary exists for, and only a glossary fixes it. A render-time corrections file (`Dreisler: Geisler`, applied like the speaker map and recorded in the stamp) would keep the raw record lossless while fixing the printout; not built. |
 | **Forced alignment (`align.py`)** | Dispatched to but not built. No registered real model declares `word_timestamps="none"`, so nothing needs it yet; the run records the gap in `warnings` rather than emitting untimed words that look timed. Build it when a model needs it, using `CrisperWhisperModel.forced_align()`. |
+| **Speaker identification from an enrolled embedding library** | **Far future — logged 2026-09-01, not scheduled.** Diarization *is* embedding + clustering, and `community-1` computes a per-label embedding internally (its config names an embedding model in the clustering step) and discards it. The feature: a stage-1.5 pass that takes each label's centroid, cosine-matches it against enrolled voices, and **emits a proposed `_speakers.yaml` with confidence scores** — never rewriting the raw labels (D3). It would also merge an over-split speaker automatically. **The constraint is not technical:** a library of participant voice embeddings is biometric data, a different consent and IRB category from a transcript; scope any library to non-participants (hosts, guest faculty) or make it per-study with consent first. Checked, not assumed: pyannote 4.0.3's diarization pipeline has **no `return_embeddings`** flag (only its speech-separation pipeline does; 3.x had it on diarization), so extracting the vectors is the spike's first question. Spike, per the house rule: centroids from two recordings of the same host; does cosine similarity clear the noise of different rooms and microphones? If it does, the cheap groundwork is storing per-label centroids in the raw JSON so a library can be built retroactively — stripped from any public fixture, the way the cluster user id was. |
 | **CrisperWhisper `confidence`** | Declared `False`. `TranscriptionResult` has no per-word confidence field, so `conf` is always null. Worth revisiting if a later package version exposes one — coders benefit from knowing which tokens the model was unsure of. |
 
 ---
 
 ## 11. Next action
 
-**Phase 2: the renderer.** Stage 1 now emits schema v1, so the highest-value next step is to
-generate one real raw JSON from a full recording and commit it as `tests/fixtures/golden.json`
-(plan §7). Every part of stage 2 — turn grouping, within-turn anchors, speaker assignment and
-smoothing, line numbering, print CSS, both profiles, all format backends — is then a pure
-function over that file, developed and tested on any machine in milliseconds with no GPU.
+**Put a real transcript in front of the coders.** Phases 1 and 2 are built; the question now
+is whether the coding profile is usable on paper, and only the students who mark these up can
+answer it. Render `tests/fixtures/golden.json` (or any stage-1 record) with
+`--profile coding`, print the HTML, and hand it over. Two things to watch for:
 
-Two smaller things worth doing alongside, both cheap:
+- **D23's right-hand margin** — enough room, or do they want double-spaced lines? Five-minute
+  CSS change either way.
+- **Sentence-per-line numbering** — a pause-split fragment is its own numbered line by design
+  (it shows exactly where the speaker hesitated), but it is also more lines to cite. See
+  whether that helps or annoys.
 
-- **The `prototype` SLURM profile.** `run_transcription.sh` still requests 8-hour GPU jobs,
-  which is the shape a scheduler defers. A `--time=00:15:00` single-GPU job is what backfill
-  slots in immediately, and the verification runs in §8 show minutes of GPU time is all a
-  90 s window needs.
-- **Re-derive the pause threshold.** Bug 8 is fixed, so the 0.3 s default was measured against
-  distorted data and needs redoing against a current run (§6).
+**Get a participant interview recording onto the cluster** (§7). The coding profile has been
+developed against a guest lecture with host interaction. Spontaneous two-party dialogue —
+overlap, short turns, fillers at speaker changes — is where assignment and smoothing are
+hardest, and none of it is represented in the fixture.
 
-Phase 0's remaining question — whether Granite 4.1-plus can combine timestamp and
-speaker-attribution modes in one prompt — is Phase 3's problem, and the registry already holds
-its declared shape so the adapter has a target to hit.
+Then Phase 3: the Granite 4.1-plus adapter, which exercises `end_only` timestamps, silence
+tokens and native speaker labels — the paths that prove the capability contract was not
+written around one model. The registry already holds its declared shape.
 
 ---
 
