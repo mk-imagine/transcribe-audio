@@ -154,6 +154,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "Explicit, and recorded in the output's provenance.")
     p.add_argument("--backend", default=None, choices=["auto", "ct2", "transformers"],
                    help="CrisperWhisper inference backend. ct2 is ~4-5x faster.")
+    p.add_argument("--compute_type", default=None,
+                   choices=["float16", "int8_float16", "int8", "float32"],
+                   help="CrisperWhisper/ct2 numeric type. Default: float16 on "
+                        "CUDA, float32 on CPU (ct2 refuses float16 on CPU).")
     p.add_argument("--device", default=None, choices=["cuda", "cpu"],
                    help="Default: cuda when available, else cpu. MPS is not a "
                         "target (D13).")

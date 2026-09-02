@@ -247,6 +247,7 @@ class _Args:
         self.hotwords_list = []
         self.timestamp_mode = "word"
         self.dual_stream = False
+        self.compute_type = None
         self.source_path = None
         self.start_time = None
         self.end_time = None
@@ -380,6 +381,21 @@ def _():
     intended = preview.render(doc, secondary=True)
     assert "[UM]" in verbatim and "[UM]" not in intended
     assert "[intended stream]" in intended and "[verbatim stream]" in verbatim
+
+
+@check("CrisperWhisper picks a compute type the device can run: float32 on CPU")
+def _():
+    from pipeline.adapters.crisperwhisper2 import CrisperWhisper2Adapter as A
+    assert A.default_compute_type("cpu") == "float32"
+    assert A.default_compute_type("cuda") == "float16"
+    assert A.default_compute_type("cuda:1") == "float16"
+    a = A("nyralabs/CrisperWhisper2.0_large", "cpu", compute_type="int8")
+    assert a.compute_type == "int8", "an explicit choice must be honoured"
+    try:
+        A("nyralabs/CrisperWhisper2.0_large", "cpu", compute_type="bfloat16")
+    except ValueError:
+        return
+    raise AssertionError("an undocumented compute type was accepted")
 
 
 @check("the validator catches a malformed document")
