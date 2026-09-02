@@ -48,9 +48,15 @@ def annotate_stream(words: List[Dict[str, Any]], dissenters: Sequence[List[str]]
     for c in cands:
         k = spoken[c.index]
         c.index = k                                   # report the record's word index
-        if not c.masked and FLAG not in words[k]["flags"]:
+        if c.flagged and FLAG not in words[k]["flags"]:
             words[k]["flags"] = list(words[k]["flags"]) + [FLAG]
     return cands, stats
+
+
+def hotwords_of(doc: Dict[str, Any]) -> List[str]:
+    """The terms the primary was biased toward, from its own provenance."""
+    hw = (doc.get("asr") or {}).get("params", {}).get("hotwords")
+    return list(hw) if isinstance(hw, (list, tuple)) else []
 
 
 def annotate(doc: Dict[str, Any], dissenter_docs: Sequence[Dict[str, Any]], paths: Sequence[str],
@@ -89,6 +95,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-name-exempt", dest="exempt_name_like", action="store_false",
                    help="let the mask hide capitalised mid-sentence tokens too")
     p.add_argument("--no-pronoun-expansion", dest="expand_pronoun_s", action="store_false")
+    p.add_argument("--allow", nargs="*", default=[], metavar="TERM",
+                   help="terms never to flag, in addition to the primary's own hotwords")
+    p.add_argument("--no-hotword-allowlist", dest="use_hotwords", action="store_false",
+                   help="do flag the primary's hotwords when the dissenters disagree with them")
     return p
 
 
@@ -120,16 +130,24 @@ def main() -> None:
                          path, n, n_primary)
             sys.exit(2)
 
+    allow = list(args.allow)
+    if args.use_hotwords:
+        hw = hotwords_of(doc)
+        if hw:
+            logger.info("allowlisting the primary's %d hotword term(s): %s", len(hw), hw)
+        allow += hw
     rules = {"expand_pronoun_s": args.expand_pronoun_s, "mask_adjacent": args.mask_adjacent,
-             "exempt_name_like": args.exempt_name_like, "min_dissenters": args.min_dissenters}
+             "exempt_name_like": args.exempt_name_like, "min_dissenters": args.min_dissenters,
+             "allow_terms": allow}
     annotate(doc, diss, args.dissenters, rules)
 
     st = doc["annotation"]["primary"]["stats"]
-    logger.info("primary: %d fluent tokens, %d candidates, %d masked, %d flagged (%.2f%%)",
-                st["fluent_tokens"], st["candidates"], st["masked"], st["flagged"], st["flagged_pct_of_fluent"])
+    logger.info("primary: %d fluent tokens, %d candidates, %d masked, %d allowlisted, %d flagged (%.2f%%)",
+                st["fluent_tokens"], st["candidates"], st["masked"], st["allowlisted"], st["flagged"],
+                st["flagged_pct_of_fluent"])
     for c in doc["annotation"]["primary"]["candidates"]:
-        logger.info("  %s %-20s adjacent=%s name_like=%s", "masked " if c["masked"] else "FLAGGED",
-                    c["token"], c["adjacent_disfluency"], c["name_like"])
+        state = "masked " if c["masked"] else ("allowed" if c["allowlisted"] else "FLAGGED")
+        logger.info("  %s %-20s adjacent=%s name_like=%s", state, c["token"], c["adjacent_disfluency"], c["name_like"])
     stem = src.stem[:-4] if src.stem.endswith("_raw") else src.stem
     out = Path(args.output) if args.output else src.parent / f"{stem}_annotated.json"
     schema.write(out, doc)

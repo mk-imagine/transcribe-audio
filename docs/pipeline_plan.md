@@ -1003,6 +1003,16 @@ array); a dissenter adapter now fails the run on an empty transcript, and `annot
 refuses a dissenter with under a quarter of the primary's tokens, since it would vote against
 everything and the conjunction would quietly become a vote of the rest.
 
+**The hotwords allowlist, and what it revealed.** A term the primary was deliberately biased
+toward cannot be confirmed by dissenters that cannot spell it either, so a correctly biased
+`Courchesne` was flagged four times. `annotate.py` now reads the primary's hotwords from its own
+provenance and records such candidates as *allowlisted*, not flagged (`--allow` adds terms;
+`--no-hotword-allowlist` restores flagging). Verified on a fresh hotwords run of the 45:00
+window: `Courchesne` ×4 allowlisted; flagged `Brooklyn.`, `Okay.` — **and `commasure`**. That is
+the neighbouring word the hotword biasing damaged (D21: `commissure` → `commasure`), and all
+three dissenters caught it. The detector localises the collateral damage of the fix, which is
+as good an argument for running both as the name itself.
+
 The dissenters are separate runs because they cannot share a process with the primary:
 CrisperWhisper lives in `cw2diar`, these need `transformers` 5.16. That also happens to be what
 D1 wants — change the masking rule and `annotate.py` re-runs in a second with no GPU. The
