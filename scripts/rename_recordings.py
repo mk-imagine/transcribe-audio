@@ -6,16 +6,18 @@
 
 The recorder names a file by date and a running counter, which says nothing
 about what was recorded. The semester calendar does: a recording made on a
-Tuesday in the third week of term is PSY 498, week 3. Edit the two blocks below
-for a new semester.
+Tuesday in the third week of Fall 2026 is PSY 498, F26, week 3. Add each new
+semester to SEMESTERS below; keep the old ones, so an old recording still
+renames correctly.
 
-Naming: PSY<code>-week<N>-<Day>.<ext>, e.g. PSY777-week1-Mon.wav,
-PSY498-week1-Tue.wav. The day is always present: a course that meets twice a
-week needs it, and one name shape for every file is easier to read and to
-glob. Two recordings on the same day get -1, -2 in recorder order. Nothing is
-ever overwritten; a clash is reported and the file is left alone. Files on days
-with no class, before the semester, or not in the recorder's format are skipped
-and listed.
+Naming: PSY<code>-<term>-WK<N>-<Day>.<ext>, e.g. PSY777-F26-WK1-Mon.wav,
+PSY498-F26-WK1-Tue.wav. The term keeps a course code that recurs in a later
+semester from colliding with its earlier names. The day is always present: a
+course that meets twice a week needs it, and one name shape for every file is
+easier to read and to glob. Two recordings on the same day get -1, -2 in
+recorder order. Nothing is ever overwritten; a clash is reported and the file
+is left alone. Files outside every semester, on days with no class, or not in
+the recorder's format are skipped and listed.
 
 On a day two courses share, the recording's own clock decides: the BWF `bext`
 chunk the recorder writes into the file (set the recorder to BWF). Its
@@ -38,20 +40,23 @@ from typing import Dict, List, Optional, Tuple
 
 # ---------------------------------------------------------------- calendar ---
 
-#: First day of the semester. Week 1 is the seven days starting here.
-#: Fall 2026: Monday 24 August. (31 August is the Monday of week 2.)
-SEMESTER_START = date(2026, 8, 24)
-
-#: Course code -> the days it meets, and an optional time window,
-#: e.g. "time": (time(9, 0), time(11, 45)) for 09:00-11:45.
-#: Times are only consulted when two courses share a day, and then every course
-#: on that day needs one; the recording's span comes from its BWF `bext` chunk.
-#: Leave time=None when one course per day is enough, as it is this semester.
-COURSES: Dict[str, dict] = {
-    "777": {"name": "Multivariate Statistics", "days": ("Mon", "Wed"), "time": None},
-    "498": {"name": "Cognitive Neuroscience", "days": ("Tue",), "time": None},
-    "896": {"name": "Lab", "days": ("Fri",), "time": None},
-}
+#: One entry per semester; add new ones, keep old ones. Dates must not overlap.
+#:   term:    the short code in the file name, e.g. F26, S27
+#:   start:   first day; week 1 is the seven days starting here
+#:   end:     last day, inclusive; a recording after it is not renamed
+#:   courses: course code -> the days it meets, and an optional time window,
+#:            e.g. "time": (time(9, 0), time(11, 45)) for 09:00-11:45. Times are
+#:            only consulted when two courses share a day, and then every course
+#:            on that day needs one; the recording's span comes from its BWF
+#:            `bext` chunk. Leave time=None when one course per day is enough.
+SEMESTERS: List[dict] = [
+    {"name": "Fall 2026", "term": "F26", "start": date(2026, 8, 24), "end": date(2026, 12, 11),
+     "courses": {
+         "777": {"name": "Multivariate Statistics", "days": ("Mon", "Wed"), "time": None},
+         "498": {"name": "Cognitive Neuroscience", "days": ("Tue",), "time": None},
+         "896": {"name": "RADLab", "days": ("Fri",), "time": None},
+     }},
+]
 
 #: Department prefix in the new name.
 PREFIX = "PSY"
@@ -62,13 +67,40 @@ WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 RECORDER = re.compile(r"^(?P<yymmdd>\d{6})_(?P<seq>\d+)\.(?P<ext>[A-Za-z0-9]+)$")
 
 
-def week_number(day: date, start: date = SEMESTER_START) -> Optional[int]:
-    """1 for the first seven days from `start`, 2 for the next, ... None before it."""
-    delta = (day - start).days
-    return None if delta < 0 else delta // 7 + 1
+def semester_problems(semesters: List[dict]) -> List[str]:
+    """What is wrong with the SEMESTERS table; empty when it is usable."""
+    problems = []
+    for s in semesters:
+        if s["start"] > s["end"]:
+            problems.append(f"{s['name']}: starts {s['start']}, after it ends {s['end']}")
+        for code, c in s["courses"].items():
+            bad = [d for d in c["days"] if d not in WEEKDAYS]
+            if bad:
+                problems.append(f"{s['name']}: course {code} meets on unknown day(s) {', '.join(bad)}")
+    terms = [s["term"] for s in semesters]
+    problems += [f"term {t} is used by more than one semester" for t in sorted(set(terms)) if terms.count(t) > 1]
+    ordered = sorted(semesters, key=lambda s: s["start"])
+    for a, b in zip(ordered, ordered[1:]):
+        if b["start"] <= a["end"]:
+            problems.append(f"{a['name']} ({a['start']} to {a['end']}) overlaps "
+                            f"{b['name']} ({b['start']} to {b['end']})")
+    return problems
 
 
-def courses_on(weekday: str, courses: Dict[str, dict] = COURSES) -> List[str]:
+def semester_for(day: date, semesters: List[dict]) -> Optional[dict]:
+    """The semester whose start..end (inclusive) holds `day`, or None."""
+    for s in semesters:
+        if s["start"] <= day <= s["end"]:
+            return s
+    return None
+
+
+def week_number(day: date, start: date) -> int:
+    """1 for the first seven days from `start`, 2 for the next, ..."""
+    return (day - start).days // 7 + 1
+
+
+def courses_on(weekday: str, courses: Dict[str, dict]) -> List[str]:
     return [code for code, c in courses.items() if weekday in c["days"]]
 
 
@@ -117,7 +149,7 @@ def recording_span(path: Path) -> Optional[Span]:
     return start, start + data_len / byte_rate
 
 
-def course_for(day: date, span: Optional[Span], courses: Dict[str, dict] = COURSES) -> Tuple[Optional[str], str]:
+def course_for(day: date, span: Optional[Span], courses: Dict[str, dict]) -> Tuple[Optional[str], str]:
     """The course code for a recording on `day` spanning `span`, or (None, why)."""
     wd = WEEKDAYS[day.weekday()]
     hits = courses_on(wd, courses)
@@ -158,15 +190,15 @@ def parse_recorder_name(name: str) -> Optional[Tuple[date, int, str]]:
     return d, int(m.group("seq")), m.group("ext")
 
 
-def target_name(code: str, week: int, day: date, ext: str, *,
+def target_name(code: str, term: str, week: int, day: date, ext: str, *,
                 same_day_index: Optional[int], prefix: str = PREFIX) -> str:
-    name = f"{prefix}{code}-week{week}-{WEEKDAYS[day.weekday()]}"
+    name = f"{prefix}{code}-{term}-WK{week}-{WEEKDAYS[day.weekday()]}"
     if same_day_index is not None:
         name += f"-{same_day_index}"
     return f"{name}.{ext.lower()}"
 
 
-def plan(directory: Path, *, start: date = SEMESTER_START, courses: Dict[str, dict] = COURSES,
+def plan(directory: Path, *, semesters: List[dict] = SEMESTERS,
          prefix: str = PREFIX) -> Tuple[List[Tuple[Path, Path]], List[Tuple[Path, str]]]:
     """(renames, skipped). Pure: touches nothing."""
     parsed = []
@@ -193,15 +225,16 @@ def plan(directory: Path, *, start: date = SEMESTER_START, courses: Dict[str, di
     renames: List[Tuple[Path, Path]] = []
     targets: Dict[Path, Path] = {}
     for p, d, seq, ext in parsed:
-        week = week_number(d, start)
-        if week is None:
-            skipped.append((p, f"{d} is before the semester start {start}"))
+        sem = semester_for(d, semesters)
+        if sem is None:
+            skipped.append((p, f"{d} is in no semester"))
             continue
-        code, why = course_for(d, recording_span(p), courses)
+        code, why = course_for(d, recording_span(p), sem["courses"])
         if code is None:
-            skipped.append((p, f"{d} ({WEEKDAYS[d.weekday()]}): {why}"))
+            skipped.append((p, f"{d} ({WEEKDAYS[d.weekday()]}, {sem['term']}): {why}"))
             continue
-        new = p.with_name(target_name(code, week, d, ext, same_day_index=same_day_index[p], prefix=prefix))
+        new = p.with_name(target_name(code, sem["term"], week_number(d, sem["start"]), d, ext,
+                                      same_day_index=same_day_index[p], prefix=prefix))
         if new == p:
             continue
         if new.exists():
@@ -219,8 +252,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0], formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("directory", nargs="?", default="data", help="folder of recordings (default: data)")
     ap.add_argument("--apply", action="store_true", help="rename; without it, only show the plan")
-    ap.add_argument("--start", type=lambda s: date.fromisoformat(s), default=SEMESTER_START,
-                    help=f"first day of the semester, YYYY-MM-DD (default {SEMESTER_START})")
     ap.add_argument("--prefix", default=PREFIX, help=f"department prefix (default {PREFIX})")
     args = ap.parse_args(argv)
 
@@ -228,11 +259,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not directory.is_dir():
         print(f"not a directory: {directory}", file=sys.stderr)
         return 2
-    print(f"semester start {args.start} ({WEEKDAYS[args.start.weekday()]}); "
-          + "; ".join(f"{args.prefix} {c} on {'/'.join(v['days'])}"
-                      + (f" {v['time'][0]:%H:%M}-{v['time'][1]:%H:%M}" if v.get("time") else "")
-                      for c, v in COURSES.items()))
-    renames, skipped = plan(directory, start=args.start, prefix=args.prefix)
+    problems = semester_problems(SEMESTERS)
+    if problems:
+        print("SEMESTERS is not usable:\n  " + "\n  ".join(problems), file=sys.stderr)
+        return 2
+    for sem in SEMESTERS:
+        print(f"{sem['term']} {sem['start']} ({WEEKDAYS[sem['start'].weekday()]}) to {sem['end']}: "
+              + "; ".join(f"{args.prefix} {c} on {'/'.join(v['days'])}"
+                          + (f" {v['time'][0]:%H:%M}-{v['time'][1]:%H:%M}" if v.get("time") else "")
+                          for c, v in sem["courses"].items()))
+    renames, skipped = plan(directory, semesters=SEMESTERS, prefix=args.prefix)
     for old, new in renames:
         print(f"  {old.name:24s} -> {new.name}")
     for p, why in skipped:
