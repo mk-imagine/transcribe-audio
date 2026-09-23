@@ -101,7 +101,7 @@ record's `errors`); `2` — the model id or the requested mode was refused.
 ./src/run_transcription.sh -i data/x.wav -o ./transcripts [-c gpu|cpu] [-E <env>] [-M <model>] [-s HH:MM:SS -e HH:MM:SS]
 ```
 
-Works from any directory. Logs go to `hpc/logs/`. Default env is `cw2native`; pass `-E cw2diar`
+Works from any directory. Logs go to `scratch/logs/`. Default env is `cw2native`; pass `-E cw2diar`
 for diarization. See `docs/environments.md` for the envs, the partitions, and how to reach the
 cluster; `envs/cw2diar.sh` is the recipe for the combined environment.
 
@@ -281,14 +281,15 @@ Its README has the provenance.
 src/
   transcribe_audio.py       stage 1 CLI            src/pipeline/      the contract, registry, adapters, schema
   annotate.py               stage 1.5 CLI          src/render/        speakers, segmentation, formats, print CSS
-  render.py                 stage 2 CLI            src/run_transcription.sh, transcribe.slurm   SLURM wrappers
+  render.py                 stage 2 CLI            src/run_transcription.sh   SLURM submit wrapper
 docs/
   pipeline_plan.md          THE design document: decision log D1–D23, measured model facts, the bug queue
   environments.md           the cluster: access, mamba envs, partitions, reference audio
 tests/                      the check suites and the fixture
 scripts/rename_recordings.py  recorder files -> PSY<code>-week<N> names, from the semester calendar
 envs/cw2diar.sh             recipe for the combined CrisperWhisper + pyannote env
-hpc/                        job scripts and SLURM logs on the cluster (gitignored; its README explains)
+hpc/                        SLURM entry points: transcribe.slurm, transcribe_parallel.slurm
+scratch/                    one-off job scripts and SLURM logs on the cluster (gitignored; its README explains)
 ```
 
 `docs/pipeline_plan.md` is the authority. Its decision log records what was decided, why, and

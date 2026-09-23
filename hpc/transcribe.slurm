@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-# Relative to the submit directory, so a direct `sbatch src/transcribe.slurm`
+# Relative to the submit directory, so a direct `sbatch hpc/transcribe.slurm`
 # must be run **from the repo root**. SLURM will not create the directory, and
 # a job whose output file cannot be opened dies immediately with no log at all
 # -- so submitting from elsewhere fails silently. run_transcription.sh
 # overrides this with an absolute path built from its own location and creates
 # the directory first, which is why it is the supported entry point and works
 # from any directory.
-#SBATCH --output=hpc/logs/transcribe_%j.log
+#SBATCH --output=scratch/logs/transcribe_%j.log
 
 set -e
 

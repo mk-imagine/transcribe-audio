@@ -53,4 +53,4 @@ python src/transcribe_audio.py -i data/251211_0009.wav -o transcripts/golden \
 
 Expect the same token counts; timestamps may differ on a handful of bounds by ≤0.12 s
 (plan §3, batched-decode rounding). The job script that produced this one is
-`hpc/jobs/golden_fixture.sbatch` on the cluster.
+`scratch/jobs/golden_fixture.sbatch` on the cluster.
