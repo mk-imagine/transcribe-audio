@@ -264,7 +264,7 @@ python3 tests/check_rename.py      # 13: the recording-renaming script
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified
-on real audio**: an `sbatch` run against `data/geisler.wav` at 45:00–46:30, where the reference
+on real audio**: an `sbatch` run against `data/PSY582-S26-WK9-Thu.wav` (formerly `geisler.wav`) at 45:00–46:30, where the reference
 expectation is ~10 filled-pause markers with per-word timestamps on every token including the
 markers. This project has been burned three times by a model integration that ran, produced
 plausible output, and was wrong — read a model's own card and package before writing to it.

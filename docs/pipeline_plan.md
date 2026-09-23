@@ -51,8 +51,8 @@ device selection, and stage-1 text cleaning.
 Not yet written: `annotate.py` (stage 1.5), `render.py` and everything under `src/render/`
 (stage 2, Phase 2), `align.py`, and the Granite adapter (Phase 3).
 
-Sample data: `data/geisler.wav`, `data/251211_0009.wav`, `data/PSY777-week1-Wed.m4a` (see
-`docs/environments.md`). The old output `transcripts/lecture transcript.txt` — fully
+Sample data: `data/PSY582-S26-WK9-Thu.wav` (formerly `geisler.wav`, the verbatim reference) and
+`data/PSY777-F26-WK1-Wed.m4a` (see `docs/environments.md`). The old output `transcripts/lecture transcript.txt` — fully
 normalized prose, zero disfluencies, no timestamps, multi-thousand-word paragraph blocks — is
 what this work replaces: fine as lecture notes, **unusable for coding**.
 
