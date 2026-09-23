@@ -4,7 +4,7 @@ Three rules from the card, each of which this project once got wrong (plan §3):
 cast **only** ``inputs["audios"]`` to fp16, cap audio at 30 s
 (``audio_max_length``), and generate greedily with the model's special tokens
 banned. Get any of them wrong and the output collapses into repeated CJK
-characters -- ``hpc/logs/ark_48646.log`` has the specimen. Verified 2026-09-01.
+characters -- ``scratch/logs/ark_48646.log`` has the specimen. Verified 2026-09-01.
 """
 
 from __future__ import annotations

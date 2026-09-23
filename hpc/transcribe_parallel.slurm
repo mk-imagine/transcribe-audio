@@ -2,7 +2,7 @@
 # Stage 1 over several recordings at once, in one allocation. File i runs as its
 # own process on GPU (i / PER_GPU) of the allocation, with its own log.
 #
-#   sbatch --gres=gpu:<G> --cpus-per-task=<8 x files> src/transcribe_parallel.slurm \
+#   sbatch --gres=gpu:<G> --cpus-per-task=<8 x files> hpc/transcribe_parallel.slurm \
 #       <PER_GPU> <output_dir> <audio> [<audio> ...]
 #
 # Needs #files <= G x PER_GPU. Submit from the repo root, as with
@@ -27,7 +27,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --mem=128G
-#SBATCH --output=hpc/logs/%x_%j.log
+#SBATCH --output=scratch/logs/%x_%j.log
 
 if [ $# -lt 3 ]; then
     echo "usage: sbatch --gres=gpu:<G> ... $0 <PER_GPU> <output_dir> <audio> [<audio> ...]"
@@ -60,7 +60,7 @@ run_one() {
     local slot=$1 audio=$2
     local gpu=${GPUS[$(( slot / PER_GPU ))]}
     local name; name=$(basename "${audio%.*}")
-    local log="hpc/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${name}.log"
+    local log="scratch/logs/${SLURM_JOB_NAME}_${SLURM_JOB_ID}_${name}.log"
     echo "START $(date +%T)  gpu $gpu  $audio  (log $log)"
     # $FLAGS is unquoted on purpose: it carries several flags.
     CUDA_VISIBLE_DEVICES=$gpu OMP_NUM_THREADS=$THREADS MKL_NUM_THREADS=$THREADS TORCH_NUM_THREADS=$THREADS \

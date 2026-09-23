@@ -14,7 +14,7 @@ there by a batch job are not visible from the login node.
 > ### Use `mamba`, not `conda`, for all environment management
 >
 > Create, install, remove, activate and run through mamba. It resolves far faster
-> and is what `src/transcribe.slurm` already activates with.
+> and is what `hpc/transcribe.slurm` already activates with.
 >
 > ```bash
 > source $HOME/miniforge3/etc/profile.d/mamba.sh   # for `mamba activate`
@@ -76,7 +76,7 @@ running, 5 submitted.** A third job waits with reason `QOSMaxJobsPerUserLimit` e
 idle; a sixth submission is refused. Three lectures submitted together therefore run two-then-one,
 which is fine — but a per-file sweep should submit at most five, or chain them. Better: nothing
 limits GPUs per job, so run the sweep inside one or two allocations with
-`src/transcribe_parallel.slurm` (one process per file, 1–2 per GPU; its header has the measurements).
+`hpc/transcribe_parallel.slurm` (one process per file, 1–2 per GPU; its header has the measurements).
 
 Chain dependent work rather than polling: `sbatch --dependency=afterany:<jobid>`.
 

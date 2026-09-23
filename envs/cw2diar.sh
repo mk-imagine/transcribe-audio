@@ -9,7 +9,7 @@
 # crisperwhisper[ct2] needs no torch at all. No transformers here, so a CT2
 # conversion to a new compute type has to be done in cw2native first.
 #
-#   bash envs/cw2diar.sh > hpc/logs/env_cw2diar.log 2>&1
+#   bash envs/cw2diar.sh > scratch/logs/env_cw2diar.log 2>&1
 set -o pipefail
 M=$HOME/miniforge3/bin/mamba
 E=$HOME/miniforge3/envs/cw2diar

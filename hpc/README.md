@@ -1,45 +1,25 @@
-# `hpc/` — cluster scratch
+# `hpc/` — SLURM entry points for POLARIS
 
-Job scripts and SLURM output from runs on POLARIS. **Everything here except this
-file is gitignored**, so it sits beside the work it describes without ever being
-committed.
+The tracked job scripts for stage 1 on the cluster. One-off job scripts, SLURM logs and
+analysis helpers are scratch, and live in the gitignored `scratch/` (its README explains).
 
 | | |
 |---|---|
-| `hpc/jobs/` | `*.sbatch` — one-off and exploratory job scripts |
-| `hpc/logs/` | `*.log` — SLURM stdout/stderr, named `<jobname>_<jobid>.log` |
-| `hpc/scripts/` | analysis helpers run against the outputs |
+| `transcribe.slurm` | one recording per job. Submitted through `src/run_transcription.sh`, which builds the flags |
+| `transcribe_parallel.slurm` | several recordings in one allocation, one process per file on its own GPU (1–2 per GPU). Its header has the measurements behind the per-GPU choice |
 
-This directory exists because these files were accumulating in the cluster home
-directory — 45 job scripts and 53 logs at the point it was cleaned up — where
-they had no connection to the repo they belonged to.
+Both write their logs to `scratch/logs/`.
 
-Every job script here writes to `hpc/logs/` via an **absolute** `--output`:
+`src/run_transcription.sh` is the supported way to submit one file. It derives every path
+from its own location and creates the log directory before submitting, so it works from any
+directory.
 
-```
-#SBATCH --output=/Users/<id>/Repos/transcribe-audio/hpc/logs/%x_%j.log
-```
+A direct `sbatch hpc/transcribe.slurm` or `sbatch hpc/transcribe_parallel.slurm` must be run
+**from the repo root**. Their `--output` is relative to the submit directory, SLURM will not
+create that directory, and a job whose log file cannot be opened dies immediately *with no
+log to explain why*. `scratch/logs/.gitkeep` makes sure the directory exists in every clone,
+but only relative to the root.
 
-Absolute rather than relative because `--output` resolves against the *submit*
-directory, so a relative path silently scatters logs wherever `sbatch` happened
-to be run from. SLURM does not expand shell variables in `#SBATCH` directives,
-so `$HOME` is not an option — and these files are gitignored and exist only on
-the cluster, so a machine-specific path costs nothing.
-
-Reference audio under `data/` is human-subjects material. Job scripts name those
-paths, which is another reason nothing in here is committed.
-
-Production runs go through `src/run_transcription.sh` (one file) or
-`src/transcribe_parallel.slurm` (several at once, one process per file), not these
-scripts, and both write to `hpc/logs/` too. The wrapper derives every path from its own
-location and creates the log directory before submitting, so it works from any directory;
-`transcribe_parallel.slurm`, like `transcribe.slurm`, must be submitted from the repo root.
-
-A direct `sbatch src/transcribe.slurm` must be run **from the repo root**. Its
-`--output` is relative to the submit directory, SLURM will not create that
-directory, and a job whose log file cannot be opened dies immediately *with no
-log to explain why*. The wrapper exists partly to make that unreachable.
-
-Neither entry point changes the job's working directory: a relative
-`--input_path` or `--output_dir` stays relative to wherever you invoked it,
-which is the only behaviour that does not surprise the caller.
+Neither entry point changes the job's working directory: a relative `--input_path` or
+`--output_dir` stays relative to wherever you invoked it, which is the only behavior that
+does not surprise the caller.

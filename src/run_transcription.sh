@@ -55,7 +55,7 @@ fi
 # all named relatively, so the wrapper only worked when run from inside src/.
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 REPO_ROOT="$( cd "$SCRIPT_DIR/.." &> /dev/null && pwd )"
-LOG_DIR="$REPO_ROOT/hpc/logs"
+LOG_DIR="$REPO_ROOT/scratch/logs"
 
 # Check for .env in the repo root
 if [ -z "$HF_TOKEN" ] && [ ! -f "$REPO_ROOT/.env" ]; then
@@ -108,4 +108,4 @@ sbatch \
     --cpus-per-task=$CPUS \
     --time=$TIME_LIMIT \
     $GRES_FLAG \
-    "$SCRIPT_DIR/transcribe.slurm" "$AUDIO_FILE" "$OUTPUT_DIR" "$CLEAN_MODE" "" "$EXTRA_FLAGS"
+    "$REPO_ROOT/hpc/transcribe.slurm" "$AUDIO_FILE" "$OUTPUT_DIR" "$CLEAN_MODE" "" "$EXTRA_FLAGS"

@@ -68,7 +68,7 @@ Settled. Each entry records what would reopen it.
 | D2 | **Capability contract, not a model-name factory** | Plug-and-play comes from adapters declaring what they provide, with the orchestrator filling gaps. | — |
 | D3 | **Stage 1 is verbatim and lossless.** No cleaning, filtering, or speaker assignment. | Cleaning in stage 1 destroys information before it is ever written to disk. | — |
 | D17 | **Drive CrisperWhisper 2 through the `crisperwhisper` package, never `transformers.pipeline`.** | The package exposes `mode="verbatim"` (default), `hotwords`, `temperature_fallback` and `word_timestamps`. The pipeline exposes none of them, silently yields cleaned text, and runs 3x slower (12x vs 38x realtime). Measured: 121 filled pauses vs 0 on identical audio. | — |
-| D20 | **Use `mamba` for all environment management, never `conda`.** | Faster resolution, and `src/transcribe.slurm` already activates through it — mixing the two invites drift between what a job activates and what was built. Build fresh rather than `--clone`: clones hardlink, so pip in a clone can strip packages from the source env. | — |
+| D20 | **Use `mamba` for all environment management, never `conda`.** | Faster resolution, and `hpc/transcribe.slurm` already activates through it — mixing the two invites drift between what a job activates and what was built. Build fresh rather than `--clone`: clones hardlink, so pip in a clone can strip packages from the source env. | — |
 | D21 | **Hotwords are a declared capability, and the standard CrisperWhisper 2 checkpoints declare `untrained`.** | Hotword boosting is trained into the Pro checkpoints only. On a standard checkpoint the package accepts the argument, raises a `UserWarning` and can *degrade* transcription -- measured, it did (§3). A run may still pass them; it warns, and the warning is written into the record. | Nyra documents hotword training for the standard weights, or a Pro licence is bought |
 | D23 | **The coding margin is a right-hand column.** | Decided 2026-09-01 without polling the coders: a wide right margin is the conventional layout for handwritten codes on a printed transcript, it is a five-minute CSS change either way, and deciding it lets Phase 2 proceed. | The student coders ask for double-spaced lines to write between instead — or anything else. **Explicitly not a point of no return.** |
 | ~~D22~~ | **Withdrawn 2026-09-01, the same day it was added.** It claimed proper-noun spelling should come from the `intended` stream. The measurement behind it was wrong (§3): a substring regex scored `Courchesney` as a match for `Courchesne`. The number is not reused; the open question is tracked in §10. | — | — |
@@ -915,7 +915,7 @@ pipeline's stride duplicating words at every boundary. Neither the card's NeMo l
 (local attention, 24 min) nor its streaming script applies to the port. Rule: ≤30 s windows,
 like ARK; a transducer needs no overlap.
 
-**ARK's `牵牵牵` collapse is in `hpc/logs/ark_48646.log`** for anyone who doubts the §3
+**ARK's `牵牵牵` collapse is in `scratch/logs/ark_48646.log`** for anyone who doubts the §3
 callout: every float tensor cast to fp16, no `audio_max_length`, `max_new_tokens=600`.
 
 **The conjunction, on both windows:**
@@ -979,7 +979,7 @@ second.
 Cost is far below the earlier ~40% estimate: ARK ~17–22×, TDT ~100×, CTC ~675× realtime
 against CrisperWhisper's ~33×, so all three add roughly **+8%** to a run (ARK dominates).
 
-The script that produced the earlier 0.8%/2.0% figures was not in `hpc/jobs/` — an ad-hoc
+The script that produced the earlier 0.8%/2.0% figures was not in `scratch/jobs/` — an ad-hoc
 login-node run — so these rates stand on their own rather than as a replication; the fluent
 view here is written from this section's rules.
 
