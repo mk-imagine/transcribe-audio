@@ -36,6 +36,9 @@ F26 = rr.SEMESTERS[0]
 def _():
     assert (F26["term"], F26["start"], F26["end"]) == ("F26", date(2026, 8, 24), date(2026, 12, 11))
     assert F26["start"].weekday() == 0 and F26["end"].weekday() == 4
+    from datetime import time
+    assert {c: v["time"] for c, v in F26["courses"].items()} == {
+        "777": (time(14, 0), time(15, 40)), "498": (time(9, 0), time(11, 45)), "896": (time(13, 0), time(14, 30))}
     assert rr.semester_problems(rr.SEMESTERS) == []
     start = F26["start"]
     assert rr.week_number(date(2026, 8, 24), start) == 1
@@ -65,7 +68,7 @@ def _sem(name, term, start, end, courses):
     return {"name": name, "term": term, "start": start, "end": end, "courses": courses}
 
 
-@check("a bad SEMESTERS table is refused: overlapping dates, a reversed range, a repeated term, an unknown day")
+@check("a bad SEMESTERS table is refused: overlapping dates, a reversed range, a repeated term, an unknown day, a reversed window")
 def _():
     one = {"777": {"days": ("Mon",), "time": None}}
     fall = _sem("Fall 2026", "F26", date(2026, 8, 24), date(2026, 12, 11), one)
@@ -79,6 +82,10 @@ def _():
     assert probs == ["term F26 is used by more than one semester"], probs
     probs = rr.semester_problems([_sem("X", "X", date(2027, 1, 1), date(2027, 5, 1), {"1": {"days": ("Tues",)}})])
     assert "unknown day(s) Tues" in probs[0], probs
+    from datetime import time
+    probs = rr.semester_problems([_sem("X", "X", date(2027, 1, 1), date(2027, 5, 1),
+                                       {"1": {"days": ("Mon",), "time": (time(15, 40), time(14, 0))}})])
+    assert "15:40-14:00 does not start before it ends" in probs[0], probs
 
 
 def _bwf(path, start_s, seconds, *, rate=8, bext_size=1116):

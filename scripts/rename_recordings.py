@@ -52,9 +52,9 @@ from typing import Dict, List, Optional, Tuple
 SEMESTERS: List[dict] = [
     {"name": "Fall 2026", "term": "F26", "start": date(2026, 8, 24), "end": date(2026, 12, 11),
      "courses": {
-         "777": {"name": "Multivariate Statistics", "days": ("Mon", "Wed"), "time": None},
-         "498": {"name": "Cognitive Neuroscience", "days": ("Tue",), "time": None},
-         "896": {"name": "RADLab", "days": ("Fri",), "time": None},
+         "777": {"name": "Multivariate Statistics", "days": ("Mon", "Wed"), "time": (time(14, 0), time(15, 40))},
+         "498": {"name": "Cognitive Neuroscience", "days": ("Tue",), "time": (time(9, 0), time(11, 45))},
+         "896": {"name": "RADLab", "days": ("Fri",), "time": (time(13, 0), time(14, 30))},
      }},
 ]
 
@@ -77,6 +77,9 @@ def semester_problems(semesters: List[dict]) -> List[str]:
             bad = [d for d in c["days"] if d not in WEEKDAYS]
             if bad:
                 problems.append(f"{s['name']}: course {code} meets on unknown day(s) {', '.join(bad)}")
+            if c.get("time") and not c["time"][0] < c["time"][1]:
+                problems.append(f"{s['name']}: course {code}'s window {c['time'][0]:%H:%M}-{c['time'][1]:%H:%M} "
+                                "does not start before it ends")
     terms = [s["term"] for s in semesters]
     problems += [f"term {t} is used by more than one semester" for t in sorted(set(terms)) if terms.count(t) > 1]
     ordered = sorted(semesters, key=lambda s: s["start"])

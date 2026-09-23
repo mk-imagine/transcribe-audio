@@ -237,8 +237,8 @@ python scripts/rename_recordings.py data/ --apply    # rename
 ```
 
 `SEMESTERS` at the top of the script is the whole configuration: one entry per semester, with
-its term code (`F26`), first and last day, and each course's weekdays (with an optional time
-window for a day that has two courses; Fall 2026 has none). Add each new semester and keep the
+its term code (`F26`), first and last day, and each course's weekdays and time window. The
+window only decides anything on a day two courses share; Fall 2026 has none. Add each new semester and keep the
 old ones, so an old recording still renames correctly; the script refuses to run if two
 semesters overlap. Names come out as `PSY498-F26-WK3-Tue.wav`, `PSY777-F26-WK3-Mon.wav`,
 `PSY896-F26-WK3-Fri.wav` — code, term, week, weekday, always; the term keeps a course code that
