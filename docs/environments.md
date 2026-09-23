@@ -74,7 +74,9 @@ backfill gap. `gpucluster` is usually idle, so jobs typically start immediately.
 **Per-user limits** (QOS `simple-qos`, read from `sacctmgr show qos` 2026-09-02): **2 jobs
 running, 5 submitted.** A third job waits with reason `QOSMaxJobsPerUserLimit` even when a node is
 idle; a sixth submission is refused. Three lectures submitted together therefore run two-then-one,
-which is fine — but a per-file sweep should submit at most five, or chain them.
+which is fine — but a per-file sweep should submit at most five, or chain them. Better: nothing
+limits GPUs per job, so run the sweep inside one or two allocations with
+`src/transcribe_parallel.slurm` (one process per file, 1–2 per GPU; its header has the measurements).
 
 Chain dependent work rather than polling: `sbatch --dependency=afterany:<jobid>`.
 

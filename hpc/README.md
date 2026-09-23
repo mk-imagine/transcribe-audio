@@ -29,9 +29,11 @@ the cluster, so a machine-specific path costs nothing.
 Reference audio under `data/` is human-subjects material. Job scripts name those
 paths, which is another reason nothing in here is committed.
 
-Production runs go through `src/run_transcription.sh`, not these scripts, and it
-writes to `hpc/logs/` too. It derives every path from its own location and
-creates the log directory before submitting, so it works from any directory.
+Production runs go through `src/run_transcription.sh` (one file) or
+`src/transcribe_parallel.slurm` (several at once, one process per file), not these
+scripts, and both write to `hpc/logs/` too. The wrapper derives every path from its own
+location and creates the log directory before submitting, so it works from any directory;
+`transcribe_parallel.slurm`, like `transcribe.slurm`, must be submitted from the repo root.
 
 A direct `sbatch src/transcribe.slurm` must be run **from the repo root**. Its
 `--output` is relative to the submit directory, SLURM will not create that
