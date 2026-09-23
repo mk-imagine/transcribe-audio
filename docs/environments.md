@@ -111,7 +111,7 @@ LD_LIBRARY_PATH=$HOME/miniforge3/envs/diarizen/lib mamba run -n diarizen python 
 
 ```bash
 # from src/, in cw2native
-python -u transcribe_audio.py -i ../data/geisler.wav -o ../transcripts/out \
+python -u transcribe_audio.py -i ../data/PSY582-S26-WK9-Thu.wav -o ../transcripts/out \
     --start_time 00:45:00 --end_time 00:46:30 --no_diarize --mode verbatim
 ```
 
@@ -166,12 +166,23 @@ speaker. Labels are per-recording, so each recording gets its own sidecar.
 
 `~/Repos/transcribe-audio/data/` — human-subjects material, do not copy off-cluster.
 
+Names follow `scripts/rename_recordings.py` (`PSY<course>-<term>-WK<week>-<day>`). Identities
+across renames were checked on 2026-09-22 against the `audio_sha256` stored in earlier records;
+the one exception is noted in its row.
+
 | file | duration | notes |
 |---|---|---|
-| `geisler.wav` | 91.7 min | Lecture, **disfluency-rich** — the reference for verbatim testing. 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
-| `251211_0009.wav` | 80.7 min | **Proseminar guest lecture** — a visiting professor presenting their research, with host interaction. Multi-speaker, and the source of `tests/fixtures/golden.json`. *Not* a research-participant interview: there is no interview recording in `data/` yet. |
-| `PSY777-week1-Wed.m4a` | 79.0 min | PSY 777, week 1 Wednesday, 2026-08-26 — the first lecture recorded (was `tate_1.m4a`). Low-disfluency speaker. Only `.m4a` source: stage 1 decodes it once to a temporary `.wav` before transcribing (bug 9 — pyannote on the `.m4a` directly did not finish in 45 minutes). |
-| `PSY777-week2-Mon.wav` | — | PSY 777, week 2 Monday, 2026-08-31 (was `260831_0015.wav`). |
+| `PSY582-S26-WK9-Thu.wav` | 91.7 min | **Was `geisler.wav`.** Lecture, **disfluency-rich**: the reference for verbatim testing. The 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
+| `PSY582-S26-WK12-Thu.wav` | 66.8 min | PSY 582, Spring 2026 week 12 Thursday, 2026-04-30. |
+| `PSY498-F26-WK2-Tue.wav`, `-WK4-`, `-WK5-` | 143–146 min | PSY 498, Tuesdays. The long lectures: community-1 splits them into 7–13 speaker labels (§10). |
+| `PSY498-F26-WK3-Tue.wav` | 49.9 min | PSY 498, week 3 Tuesday. |
+| `PSY777-F26-WK2-Mon.wav`, `-WK3-Wed`, `-WK4-Mon`, `-WK4-Wed`, `-WK5-Mon` | 80–94 min | PSY 777, Mondays and Wednesdays. Low-disfluency speaker. `WK2-Mon` was `PSY777-week2-Mon.wav`. |
+| `PSY777-F26-WK1-Wed.m4a`, `-WK2-Wed.m4a` | 79.0, 106.7 min | iPad Voice Memos recordings, the only `.m4a` sources. `WK1-Wed` was `PSY777-week1-Wed.m4a` (originally `tate_1.m4a`): re-exported from Voice Memos on 2026-09-22, so its bytes and `sha256` differ, but it is the same audio (identical duration, and a word-for-word identical transcript). Stage 1 decodes each once to a temporary `.wav` before transcribing (bug 9: pyannote on the `.m4a` directly did not finish in 45 minutes). |
+
+**Not on the cluster any more:** `251211_0009.wav` (80.7 min), the **proseminar guest lecture** that is the
+source of `tests/fixtures/golden.json`: a visiting professor presenting their research, with host
+interaction. A copy is on the Mac as `data/Gard_Talk.wav` (`sha256` matches the fixture's record).
+It is *not* a research-participant interview: there is no interview recording in `data/` yet.
 
 `.env` holds `HF_TOKEN` (mode 600), gitignored, required for pyannote.
 
@@ -212,6 +223,6 @@ Throughput measured on 300 s of audio, A100, correctly configured:
 | `ARK-ASR-0.6B` | 36 | 30 s audio cap → 10 calls per 300 s |
 
 The 12-window sweep used for every comparison: windows at 5/15/30/45/60/75 min, 90 s each,
-across `geisler.wav` and `251211_0009.wav`. Outputs land in
+across `geisler.wav` (now `PSY582-S26-WK9-Thu.wav`) and `251211_0009.wav`. Outputs land in
 `transcripts/wide/<tag>__<file>/`. Metrics: word count, disfluency markers, duplicate-8-gram
 rate (loop detection), and cross-model disagreement.
