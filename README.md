@@ -286,7 +286,7 @@ docs/
   pipeline_plan.md          THE design document: decision log D1–D23, measured model facts, the bug queue
   environments.md           the cluster: access, mamba envs, partitions, reference audio
 tests/                      the check suites and the fixture
-scripts/rename_recordings.py  recorder files -> PSY<code>-week<N> names, from the semester calendar
+scripts/rename_recordings.py  recorder files -> PSY<code>-<term>-WK<N>-<Day> names, from the SEMESTERS table
 envs/cw2diar.sh             recipe for the combined CrisperWhisper + pyannote env
 hpc/                        SLURM entry points: transcribe.slurm, transcribe_parallel.slurm
 scratch/                    one-off job scripts and SLURM logs on the cluster (gitignored; its README explains)
