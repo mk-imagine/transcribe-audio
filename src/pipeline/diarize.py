@@ -13,6 +13,7 @@ a vendored pyannote fork.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -83,7 +84,27 @@ class Diarizer:
         segments: List[Dict[str, Any]] = []
         diarization = None
         try:
-            diarization = self.pipeline(str(audio_path))
+            # Decode once and hand pyannote the samples, not the path. Given a
+            # path, its embedding step opens a fresh decoder for every chunk it
+            # crops -- one per second of audio, ~340 ms each on a 145 min WAV,
+            # which is most of diarization's wall time with the GPU idle. Given
+            # a waveform, each crop is a slice (~0.04 ms). Audio() keeps the
+            # file's own rate and channels, so the pipeline still downmixes and
+            # resamples chunk by chunk exactly as before: the same samples reach
+            # the models either way.
+            from pyannote.audio import Audio
+
+            started = time.perf_counter()
+            waveform, sample_rate = Audio()(str(audio_path))
+            logger.info(
+                "Diarization audio decoded once: %d ch x %d samples at %d Hz (%.0f MB) in %.1fs",
+                waveform.shape[0], waveform.shape[1], sample_rate,
+                waveform.element_size() * waveform.nelement() / 1e6,
+                time.perf_counter() - started,
+            )
+            diarization = self.pipeline(
+                {"waveform": waveform, "sample_rate": sample_rate, "uri": Path(audio_path).stem}
+            )
             for turn, speaker in diarization.speaker_diarization:
                 segments.append(
                     {"start": float(turn.start), "end": float(turn.end), "speaker": speaker}
