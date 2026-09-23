@@ -238,7 +238,11 @@ python scripts/rename_recordings.py data/ --apply    # rename
 
 `SEMESTER_START` and `COURSES` at the top of the script are the whole configuration — the
 first day of term and each course's weekdays (with an optional time window for a day that has
-two courses; this semester has none). Names come out as `PSY498-week3-Tue.wav`,
+two courses; this semester has none). On a shared day the recording's own clock decides: set
+the recorder to **BWF**, and the `bext` chunk it writes into the file gives the time the audio
+starts; with the audio's length that is a span, and the course whose window overlaps it most
+wins. It travels inside the file, so copies cannot change it. A file without `bext` renames as
+usual on a one-course day and is skipped, with the reason, on a shared one. Names come out as `PSY498-week3-Tue.wav`,
 `PSY777-week3-Mon.wav`, `PSY896-week3-Fri.wav` — code, week, weekday, always. Two recordings
 on one day get `-1`, `-2`. Nothing is ever overwritten, and a file on a day with no class is
 skipped and listed. `--start` overrides the semester start for a one-off.
@@ -251,7 +255,7 @@ Three check suites, plain asserts, no dependencies — they run on the laptop an
 python3 tests/check_contract.py    # 49: dispatch, the registry, the fixture, Granite parsing, the dissenters
 python3 tests/check_render.py      # 27: stage 2 against the fixture
 python3 tests/check_annotate.py    # 18: the fluent view, the conjunction, disfluency tags, annotate.py end to end
-python3 tests/check_rename.py      # 9:  the recording-renaming script
+python3 tests/check_rename.py      # 11: the recording-renaming script
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified
