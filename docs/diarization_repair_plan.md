@@ -222,6 +222,11 @@ true speaker changes and the rendered label does not.
   - one stretch of the instructor's run that may hold an unmarked student exchange. If it does,
     the high-harm count rises.
 
+**The sheet's grammar.** The conversion was needed because Mark's notation was more natural
+than the checker's. A grammar revision for future sheets (a speaker map in the header, a
+`>> change:` that sets the speaker in either direction, a `note:` field) is proposed in PR #26,
+along with the ambiguities it would introduce. It is not adopted.
+
 ---
 
 ## Part 2 — Manual to-dos (Mark)
