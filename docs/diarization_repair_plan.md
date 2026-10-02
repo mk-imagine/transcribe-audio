@@ -1,6 +1,6 @@
 # Diarization repair: plan and manual to-dos
 
-**Status:** plan. Nothing built. Decided 2026-09-30: speaker-attribution repair lives **here**,
+**Status:** plan. Build step 1 (the labeling sheet) is built; nothing else is. Decided 2026-09-30: speaker-attribution repair lives **here**,
 upstream, not in any downstream consumer (D24 in `pipeline_plan.md`).
 **Part 1** is the design. **Part 2** is the manual work only Mark can do, including the
 labeling this plan needs before anything can be measured.
@@ -120,6 +120,8 @@ most of the way, the model pass isn't built.
 
    It also writes a player-friendly list of timestamps for checking the audio. **Mark's labeling
    depends on this; build it first.**
+
+   **Built** (2026-10-02) as one in-place read-through: `scripts/diarization_labels.py`; format in Part 2, item 1.
 2. Mark labels (Part 2, item 1).
 3. Score the baseline (§1.4, step 1).
 4. Candidate generator; measure its recall.
@@ -149,15 +151,55 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
    (`transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json`, the 2026-08-31 lecture, 93 min,
    2 diarizer labels). It is the same lecture the study-notes spikes used, so the labels serve
    both projects. Two parts:
-   - **Part A — review the diarizer's boundaries.** There are **189** places where the label
-     changes. Mark each `real`, `spurious` or `unsure`. The sheet shows the text either side;
-     use the audio for anything unclear. Roughly an hour.
-   - **Part B — find missed changes.** Read the whole transcript for places where a different
-     person speaks with **no** label change: student questions, answers or comments inside the
-     lecturer's turn. Record each by start and end time and who spoke. This is the slower part,
-     a full read-through with audio checks, perhaps one to two hours. It is also the part that
-     matters most (§1.1).
-   - Waits on build step 1, the labeling sheet generator.
+   - **Part A — review the diarizer's boundaries.** Mark each place the label changes `real`,
+     `spurious` or `unsure`. The raw turns change label **189** times, but the sheet shows the
+     transcript as stage 2 renders it (`assign` plus `smooth`), the baseline §1.4 scores, and
+     there it changes **68** times: 60 of the raw turns' 190 label runs get no word under
+     max-overlap assignment (24 hold no word, 36 lose every word they overlap to the other
+     label), leaving 74, and smoothing removes 6. The sheet's header carries this accounting.
+   - **Part B — find missed changes.** Places where a different person speaks with **no** label
+     change: student questions, answers or comments inside the lecturer's turn. This is the
+     part that matters most (§1.1). A raw-turn change that assignment dropped is one of these
+     if someone else really spoke there.
+   - **One read-through does both.** Generate the sheet and check it as you go:
+
+     ```bash
+     python3 scripts/diarization_labels.py transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json
+     python3 scripts/diarization_labels.py --check transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.md
+     ```
+
+     The sheet (`<stem>_labels.md`) is the lecture profile's stream, one line per sentence as
+     `segment.py` defines one, each with a stable id and a timestamp (`T0071 [00:03:26.6] …`).
+     At each label change sits a boundary block:
+
+     ```
+     #### B-001  00:03:26.6  SPEAKER_01 -> SPEAKER_00
+     boundary: spurious
+     who:
+     ```
+
+     `boundary:` takes `real`, `spurious` or `unsure`; `who:` (optional, not on a spurious
+     boundary) says who speaks next: `L` the lecturer, `S` a student, `S2`–`S9` further
+     distinguishable students, `?` unknown. A missed change is a line of its own, directly above
+     the line where the new speaker starts, and a matching `back` where the earlier speaker
+     resumes, if they do (an illustration, not the lecture):
+
+     ```
+     >> change: S
+     T0412 [00:31:02.5] is that the same as the random slope
+     >> back: L "right so"
+     T0413 [00:31:05.0] yes right so the slope varies by subject
+     ```
+
+     A quoted run of whole words places the marker mid-line. A change stays open until its
+     `back` or the next boundary marked `real`. Open the audio only when the text is ambiguous
+     (`<stem>_label-times.txt` lists every boundary as `hh:mm:ss`); mark `unsure` rather than
+     guess. `--check` regenerates the sheet from the raw JSON (refusing one whose sha256
+     differs), reports progress, and reports by line number anything that is not a sheet line,
+     a field or a well-formed marker: an unknown verdict or `who`, a `back` with nothing open, a
+     change that never returns, an edited or deleted line. With no errors it writes
+     `<stem>_labels.json`, the labels §1.4 scores, positions given as word indices into the
+     stream.
    - The labels stay in `transcripts/` (gitignored). They describe a class session with student
      voices, so they are not committed alongside the public fixture.
 
