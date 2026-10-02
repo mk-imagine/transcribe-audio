@@ -178,9 +178,8 @@ the truth the scorer derives from the copy on all 14,270 words, and no word is u
    and no `spurious` one does.
 4. **A missed exchange.** One stretch of the instructor's run is a student's turn: 44 words,
    about 14 s, with the instructor answering after it. It had no markers and now does. His
-   answer doesn't say which student. From context, it is the student of the exchange just
-   before it (`S`): it continues that exchange and restates his question. `S` and `S2` score
-   identically here.
+   answer didn't say which student. Read from context as the student of the exchange just
+   before it (`S`), and **confirmed by Mark on 2026-10-02**. `S` and `S2` score identically here.
 
 **Speaker map.** SPEAKER_01 is the instructor (`L`) and SPEAKER_00 is a student (`S`). A
 second student (`S2`) has no diarizer label of their own: the diarizer split their words
@@ -203,7 +202,7 @@ python3 scripts/score_diarization.py \
 A **missed change** is a word where the true speaker changes and the rendered label does not.
 A **near miss** is a spurious boundary within N words of a missed change. The pairing is one
 to one: a change already at a boundary doesn't count, and two boundaries can't share one
-change. **Precision within N words** counts near misses as hits:
+change (operator-confirmed, 2026-10-02). **Precision within N words** counts near misses as hits:
 (real + near misses) / (real + spurious).
 
 | Measure | Value |
@@ -260,8 +259,8 @@ change. **Precision within N words** counts near misses as hits:
 **Caveats.**
 - This is one lecture and one labeler. The high-harm count is 5 changes, and one exchange
   holds most of its words (44 of 54).
-- The student in the missed exchange is a call from context, not stated in Mark's answer.
-  Another student (`S2`) would give the same numbers.
+- The student in the missed exchange was first a call from context; Mark confirmed it on
+  2026-10-02. Another student (`S2`) would give the same numbers.
 - The grammar's `?` (speaker unknown) is excluded from every per-word number. A student marked
   `?` would therefore drop out of the high-harm measures entirely. The gold doesn't use `?`.
   The grammar revision below should give "a student, identity unknown" a form of its own.
