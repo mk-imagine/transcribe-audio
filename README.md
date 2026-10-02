@@ -261,6 +261,7 @@ python3 tests/check_contract.py    # 49: dispatch, the registry, the fixture, Gr
 python3 tests/check_render.py      # 27: stage 2 against the fixture
 python3 tests/check_annotate.py    # 18: the fluent view, the conjunction, disfluency tags, annotate.py end to end
 python3 tests/check_rename.py      # 13: the recording-renaming script
+python3 tests/check_labels.py      # 38: the diarization labeling sheet, generated and read back
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified
