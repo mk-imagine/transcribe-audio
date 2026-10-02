@@ -142,8 +142,10 @@ most of the way, the model pass isn't built.
 
 §1.4 step 1, scored 2026-10-02. The current stage 2 (`assign` plus `smooth` at the lecture
 profile's defaults, which is the render the sheet shows) is measured against Mark's labels.
-This section gives aggregate numbers only. The labels, and everything derived from them,
-stay in `transcripts/` (gitignored).
+**These numbers are final under Mark's written answers to the labeling questions** (same day):
+nothing in the gold is unsure, no window is excluded, and the meaning of `real` and `spurious`
+is defined (below). This section gives aggregate numbers only. The labels, and everything
+derived from them, stay in `transcripts/` (gitignored).
 
 **The gold.** Mark labeled in a richer notation than the checker's grammar:
 - diarizer labels as identities;
@@ -153,12 +155,32 @@ stay in `transcripts/` (gitignored).
 - two verdicts written as `unknown; likely …`;
 - two typos.
 
-A converted copy beside the original (`<stem>_labels.normalized.md`) checks with 0 errors. It
-took 24 conversions, each logged with its line, its text before and after, and its rule. The
-original's sha256 is unchanged. The per-word speakers were rebuilt directly from the original
-under its own reading. They agree with the truth the scorer derives from the copy on all
-14,270 words. The two `unknown` verdicts are scored `unsure`. Mark's "likely" placements for
-them are kept in a notes sidecar and not used as truth.
+A converted copy beside the original (`<stem>_labels.normalized.md`) checks with 0 errors. A
+conversion helper generates it; nothing in it is edited by hand. The helper logs 32 changes,
+each with its line, its text before and after, and its rule. 22 of them translate the
+notation. The other 10 apply Mark's written answers as operator rules, and each one quotes the
+answer it applies. The original's sha256 is unchanged. The per-word speakers were rebuilt
+directly from the original plus his written answers, with a separate parser. They agree with
+the truth the scorer derives from the copy on all 14,270 words, and no word is unknown.
+
+**The operator's answers.**
+1. **The window after B-027/B-028.** Mark gave the speaker line by line. A one-word student
+   turn falls one word after B-027, and B-028 sits inside the instructor's speech. Both
+   boundaries are `spurious` under the convention in answer 3. The 243-word window that was
+   excluded is gone.
+2. **Three `who:` fields left empty.** He confirmed each one as the new label's speaker.
+   Nothing changes.
+3. **The convention.** `spurious` means the boundary is not where the change is: the speaker
+   that the earlier `>> change` set continues. So `real` means a boundary at the true change.
+   B-005 was labeled `real` before he adopted this convention, one word after its change. It
+   is now `spurious`, logged as an operator-confirmed reinterpretation that cites his answer.
+   The convention now holds on all 68 boundaries: every `real` boundary sits at a true change,
+   and no `spurious` one does.
+4. **A missed exchange.** One stretch of the instructor's run is a student's turn: 44 words,
+   about 14 s, with the instructor answering after it. It had no markers and now does. His
+   answer doesn't say which student. From context, it is the student of the exchange just
+   before it (`S`): it continues that exchange and restates his question. `S` and `S2` score
+   identically here.
 
 **Speaker map.** SPEAKER_01 is the instructor (`L`) and SPEAKER_00 is a student (`S`). A
 second student (`S2`) has no diarizer label of their own: the diarizer split their words
@@ -175,57 +197,81 @@ python3 scripts/score_diarization.py \
 - a `real` boundary starts its `who:`, or the new label's speaker if `who:` is empty;
 - a `spurious` boundary changes nothing;
 - a marker starts its speaker;
-- `unsure` leaves the speaker unknown until a `real` boundary or a marker names one.
+- `unsure` leaves the speaker unknown until a `real` boundary or a marker names one. None
+  remain in this gold.
 
-Unknown words are excluded from every per-word number. A **missed change** is a word where the
-true speaker changes and the rendered label does not.
+A **missed change** is a word where the true speaker changes and the rendered label does not.
+A **near miss** is a spurious boundary within N words of a missed change. The pairing is one
+to one: a change already at a boundary doesn't count, and two boundaries can't share one
+change. **Precision within N words** counts near misses as hits:
+(real + near misses) / (real + spurious).
 
 | Measure | Value |
 |---|---|
-| Diarizer boundaries | 68: real 7, spurious 59, unsure 2 |
-| Boundary precision (real / (real + spurious)) | 7/66 = **10.6%**, so 89.4% are spurious splits (10.3–13.2% with the 2 unsure counted either way) |
-| Spurious boundaries with no true change within 3 words | 51 of 59; the other 8 sit 1–3 words from a change they misplace |
-| True speaker changes | 17: 5 at a boundary, **12 missed** |
-| Missed changes that misattribute words | 8, covering 19 words. In the other 4, the label is already right from that word on: a return to the speaker the label names, or the far side of a misplaced boundary |
-| … that put student speech inside the instructor's turn | **4 changes, 10 words** |
-| Missed changes within 3 words of a diarizer boundary | 9 of 12 |
-| Words scored | 14,027 of 14,270 (243 excluded: the window after the two `unsure` boundaries) |
-| Per-word attribution accuracy | **98.8%** (170 words wrong) |
-| Student words attributed to the instructor | **12** of 156 student words (7.7%): 10 through missed changes, 2 through a spurious split |
-| Instructor words under the student's label | 143 (134 through spurious splits, 9 through missed changes) |
+| Diarizer boundaries | 68: real 6, spurious 62, unsure 0 |
+| Boundary precision (real / (real + spurious)) | 6/68 = **8.8%**, so 91.2% are spurious splits |
+| Precision within 1 word | 13/68 = **19.1%** (7 near misses) |
+| Precision within 2 words | 15/68 = **22.1%** (9 near misses) |
+| Precision within 3 words | 16/68 = **23.5%** (10 near misses) |
+| Spurious boundaries with no true change within 3 words | 52 of 62 |
+| True speaker changes | 22: 6 at a boundary, **16 missed** |
+| Missed changes that misattribute words | 10, covering 78 words. In the other 6, the label is already right from that word on: a return to the speaker the label names, or the far side of a misplaced boundary |
+| … that put student speech inside the instructor's turn | **5 changes, 54 words** |
+| Missed changes within 3 words of a diarizer boundary | 11 of 16 |
+| Words scored | 14,270 of 14,270 (none excluded) |
+| Per-word attribution accuracy | **98.4%** (230 words wrong) |
+| Student words attributed to the instructor | **56** of 201 student words (27.9%): 54 through missed changes, 2 through a spurious split |
+| Instructor words under the student's label | 159 (135 through spurious splits, 24 through missed changes) |
 | One student's words under the other's label | 15 |
 
+**Against the provisional numbers** (scored before the answers):
+
+| Measure | Provisional | Final | Why |
+|---|---|---|---|
+| Boundary precision | 7/66 = 10.6% | 6/68 = 8.8% | B-005 is `spurious` (answer 3); B-027/B-028 were `unsure` and are now `spurious` (answer 1) |
+| Missed changes | 12 | 16 | Two around the one-word student turn (answer 1), two around the missed exchange (answer 4) |
+| High-harm missed changes | 4, 10 words | 5, 54 words | The missed exchange (answer 4): 44 words |
+| Student words attributed to the instructor | 12 of 156 (7.7%) | 56 of 201 (27.9%) | The same 44 words; the one-word turn adds a student word that is attributed correctly |
+| Per-word accuracy | 98.8% over 14,027 words | 98.4% over 14,270 | The excluded window is now scored, and the exchange counts as wrong |
+
 **What it says.**
-- **Per-word accuracy hides the problem.** The instructor speaks 13,871 of the 14,027 scored
-  words. A diarizer that printed every word as the instructor's would score 98.9%, slightly
-  better than the real 98.8%. The student-side numbers are the ones to watch.
-- **Spurious splits make up almost all of the boundaries:** 59 of the 66 that have a verdict.
-  143 of the 304 words rendered under the student's label are the instructor's. This is what
-  is left *after* smoothing.
-- **The high-harm direction is small in words but present.** 12 student words, 7.7% of what
-  students said, print as lecture content. 10 of them come from 4 missed changes. This is the
-  error §1.4's gate and the merge repair exist for.
-- **Most missed changes are misplaced boundaries.** 9 of the 12 lie within 3 words of an
-  existing boundary, and 8 spurious boundaries sit 1–3 words from the change they misplace.
-  §1.3's candidate list has no "shift an existing boundary by a few words" class. On this
-  lecture, most misses would fall in that class. Step 4 should measure its recall alongside the
-  listed candidate types.
+- **Per-word accuracy hides the problem.** The instructor speaks 14,069 of the 14,270 words. A
+  diarizer that printed every word as the instructor's would score 98.6%, better than the real
+  98.4%. The student-side numbers are the ones to watch.
+- **Spurious splits make up almost all of the boundaries:** 62 of 68. 159 of the 304 words
+  rendered under the student's label are the instructor's. This is what is left *after*
+  smoothing.
+- **The high-harm direction is large.** 56 student words, 27.9% of what students said, print
+  as lecture content. 54 of them come from 5 missed changes. This is the error §1.4's gate and
+  the merge repair exist for. One missed exchange carries 44 of the 54. Its nearest diarizer
+  boundary is 12 words away, so no boundary shift recovers it. The raw diarizer turns did mark
+  its first word as SPEAKER_00. Under max-overlap, an overlapping SPEAKER_01 turn outvoted that
+  turn, so it reached no word (the header's "dropped run"). §1.3's merge candidates are textual
+  cues only. A raw-turn change that assignment dropped is acoustic evidence the generator could
+  add. Step 4 should check that this exchange is proposed either way.
+- **Misplaced boundaries are a minority of the spurious ones, but most of the misses.** Only 10
+  of the 62 spurious boundaries are near misses within 3 words (7 within 1 word). Shifting them
+  would raise precision from 8.8% to at most 23.5%. The other 52 have no change nearby and can
+  only be removed. Among the misses, 11 of 16 lie within 3 words of an existing boundary, and
+  the near-miss pairing matches 10 of them. §1.3's candidate list has no "shift an existing
+  boundary by a few words" class. Step 4 should measure its recall alongside the listed
+  candidate types.
 
 **Caveats.**
-- This is one lecture and one labeler. The high-harm counts are small (4 changes, 12 words).
-- Mark has open questions in the gitignored `<stem>_labels.questions.md`:
-  - the excluded window around B-027/B-028;
-  - which student speaks at one boundary;
-  - whether a boundary a word or two off a change is `real`. B-005 is labeled `real`, while 8
-    of the same shape are labeled `spurious`. Under a strict reading precision is 9.1%; under a
-    lenient one it is 22.7%;
-  - one stretch of the instructor's run that may hold an unmarked student exchange. If it does,
-    the high-harm count rises.
+- This is one lecture and one labeler. The high-harm count is 5 changes, and one exchange
+  holds most of its words (44 of 54).
+- The student in the missed exchange is a call from context, not stated in Mark's answer.
+  Another student (`S2`) would give the same numbers.
+- The grammar's `?` (speaker unknown) is excluded from every per-word number. A student marked
+  `?` would therefore drop out of the high-harm measures entirely. The gold doesn't use `?`.
+  The grammar revision below should give "a student, identity unknown" a form of its own.
 
 **The sheet's grammar.** The conversion was needed because Mark's notation was more natural
 than the checker's. A grammar revision for future sheets (a speaker map in the header, a
 `>> change:` that sets the speaker in either direction, a `note:` field) is proposed in PR #26,
-along with the ambiguities it would introduce. It is not adopted.
+along with the ambiguities it would introduce. It is not adopted. Mark's answer 3 now defines
+`real` and `spurious` for a boundary a few words off its change, and a revision should state
+that definition in the sheet's instructions.
 
 ---
 
@@ -293,8 +339,8 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
      voices, so they are not committed alongside the public fixture.
    - **Done** 2026-10-02. The sheet used a richer notation than the checker accepts. A converted
      copy (`<stem>_labels.normalized.md`) checks clean, and the original is untouched. The
-     conversion and the baseline it fed are in §1.7. Open questions for Mark are in
-     `<stem>_labels.questions.md`.
+     conversion and the baseline it fed are in §1.7. Mark answered the open questions in
+     `<stem>_labels.questions.md` the same day, and the §1.7 numbers are final under his answers.
 
 ### For the study-notes benchmark (`~/.config/skillshare`)
 

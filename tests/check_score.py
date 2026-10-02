@@ -70,10 +70,38 @@ RECORD = [
 ]
 TRUTH = [None if t == "U" else t for _, _, ts, _ in RECORD for t in ts.split()]
 
+# A second record, for the near-miss view: spurious boundaries 1, 2 and 3 words
+# off a change the label missed; one beside a change a real boundary already
+# found; one with no change nearby; and two either side of a single missed
+# change. Word positions in the comments: "@" a boundary, "^" a missed change.
+NEAR_RECORD = [
+    (A, "We begin with attention.", "L L L L", None),                  # 0-3
+    (A, "Okay so yes.", "L L S", '>> change: S "yes."'),               # ^6
+    (B, "Is attention limited?", "S S S", ("spurious", "")),          # B-001 @7: 1 word late
+    (A, "Yes.", "L", ("real", "")),                                    # B-002 @10, at its change
+    (B, "It is limited.", "L L L", ("spurious", "")),                 # B-003 @11: beside a found change
+    (A, "Capacity is finite.", "L L L", ("spurious", "")),            # B-004 @14: none within 3 words
+    (A, "Any questions now?", "L L L", None),                          # 17-19
+    (B, "Take time.", "L L", ("spurious", "")),                       # B-005 @20: 2 words early
+    (B, "Why though?", "S S", ">> change: S"),                         # ^22
+    (A, "Because capacity is shared.", "L L L L", ("real", "")),      # B-006 @24, at its change
+    (A, "Let us go on now.", "L L L L L", None),                       # 28-32
+    (A, "Hold on, is that true?", "L L S S S", '>> change: S "is that"'),  # ^35
+    (B, "I am not sure.", "S S S S", ("spurious", "")),               # B-007 @38: 3 words late
+    (A, "It is true.", "L L L", ("real", "")),                         # B-008 @42, at its change
+    (A, "Now the last point.", "L L L L", None),                       # 45-48
+    (B, "Now.", "L", ("spurious", "")),                               # B-009 @49: 1 word early
+    (B, "Wait.", "S", ">> change: S"),                                 # ^50
+    (A, "Is that shared too?", "S S S S", ("spurious", "")),          # B-010 @51: ^50 is taken
+    (A, "It is shared.", "L L L", ">> back: L"),                       # ^55, 4 words from B-010
+    (A, "That is all.", "L L L", None),                                # 58-60
+]
+NEAR_TRUTH = [t for _, _, ts, _ in NEAR_RECORD for t in ts.split()]
 
-def make_doc():
+
+def make_doc(record=RECORD):
     words, turns, t, i = [], [], 0.5, 0
-    for label, text, _, _ in RECORD:
+    for label, text, _, _ in record:
         s0 = t
         for tok in text.split():
             words.append({"i": i, "text": tok, "start": round(t, 2), "end": round(t + 0.3, 2),
@@ -95,22 +123,22 @@ def make_doc():
     }
 
 
-def fill(sheet, skip=()):
-    """Label the generated sheet the way RECORD says; boundaries in ``skip`` stay blank.
+def fill(sheet, skip=(), record=RECORD):
+    """Label the generated sheet the way the record says; boundaries in ``skip`` stay blank.
 
-    One sentence per row, so line Tnnnn is RECORD[n - 1], and a boundary block
+    One sentence per row, so line Tnnnn is record[n - 1], and a boundary block
     belongs to the row of the line below it."""
     lines = sheet.read_text().splitlines()
     out = []
     for n, ln in enumerate(lines):
         if ln.startswith("T0"):
-            row = RECORD[int(ln[1:5]) - 1]
+            row = record[int(ln[1:5]) - 1]
             if isinstance(row[3], str):
                 out.append(row[3])
         elif ln.startswith(("boundary:", "who:")):
             bid = next(x for x in reversed(out) if x.startswith("#### B-")).split()[1]
             below = next(x for x in lines[n:] if x.startswith("T0"))
-            verdict, who = RECORD[int(below[1:5]) - 1][3]
+            verdict, who = record[int(below[1:5]) - 1][3]
             if ln.startswith("boundary:"):
                 ln = "boundary:" if bid in skip else f"boundary: {verdict}"
             else:
@@ -119,14 +147,14 @@ def fill(sheet, skip=()):
     sheet.write_text("\n".join(out) + "\n")
 
 
-def workdir(skip=()):
+def workdir(skip=(), record=RECORD):
     """A temp dir with rec_raw.json, its filled sheet, and the checked labels."""
     td = tempfile.TemporaryDirectory()
     d = Path(td.name)
-    (d / "rec_raw.json").write_text(json.dumps(make_doc(), indent=1))
+    (d / "rec_raw.json").write_text(json.dumps(make_doc(record), indent=1))
     with contextlib.redirect_stdout(io.StringIO()):
         assert dl.main([str(d / "rec_raw.json")]) == 0
-        fill(d / "rec_labels.md", skip)
+        fill(d / "rec_labels.md", skip, record)
         rc = dl.main(["--check", str(d / "rec_labels.md")])
     assert rc == 0, "the filled synthetic sheet does not check clean"
     return td, d, d / "rec_labels.json"
@@ -252,6 +280,59 @@ def _():
                [("T0011", "T0012", 4, "B-007")], win
 
 
+# ----------------------------------------------------------- near misses ----
+
+@check("near misses: the near-miss record renders as designed and its truth matches the table")
+def _():
+    td, d, lab = workdir(record=NEAR_RECORD)
+    with td:
+        labels, stream, truth, _ = scored(lab)
+        assert len(labels["boundaries"]) == 10 and len(stream.index) == len(NEAR_TRUTH) == 61
+        assert {b["id"]: stream.index.index(b["word_i"]) for b in labels["boundaries"]} == {
+            "B-001": 7, "B-002": 10, "B-003": 11, "B-004": 14, "B-005": 20,
+            "B-006": 24, "B-007": 38, "B-008": 42, "B-009": 49, "B-010": 51}
+        assert truth == NEAR_TRUTH, [(p, a, b) for p, (a, b) in enumerate(zip(truth, NEAR_TRUTH)) if a != b]
+
+
+@check("near misses: precision within 1, 2, 3 words is 3+2, 3+3, 3+4 of 10")
+def _():
+    td, d, lab = workdir(record=NEAR_RECORD)
+    with td:
+        b = scored(lab)[3]["boundaries"]
+        assert (b["real"], b["spurious"], b["precision"]) == (3, 7, 0.3)
+        assert [(x["words"], x["near_misses"], x["precision"], x["near_miss_boundaries"])
+                for x in b["precision_within_words"]] == [
+            (1, 2, 0.5, ["B-001", "B-009"]),
+            (2, 3, 0.6, ["B-001", "B-005", "B-009"]),
+            (3, 4, 0.7, ["B-001", "B-005", "B-007", "B-009"])]
+
+
+@check("near misses are one to one with missed changes: none beside a found change, none sharing one")
+def _():
+    td, d, lab = workdir(record=NEAR_RECORD)
+    with td:
+        b = scored(lab)[3]["boundaries"]
+        # Six spurious boundaries have a true change within 3 words; four are near misses.
+        # B-003's is B-002's change, already found; B-010's is B-009's.
+        assert b["verdict_vs_truth"]["spurious"] == {"true_change_within_3_words": 6,
+                                                     "no_true_change_nearby": 1}
+        assert not {"B-003", "B-004", "B-010"} & set(b["precision_within_words"][-1]["near_miss_boundaries"])
+        # The pairing is the largest there is: matching B-009 to ^50 leaves nothing for B-010.
+        assert sd.near_misses([49, 51], [50], 1) == [49]
+        assert sd.near_misses([51, 49], [50, 52], 1) == [49, 51]
+        assert sd.near_misses([5], [2, 8], 2) == []
+
+
+@check("near misses on the first record: 0, 0, 2 (B-004 3 words late, B-010 3 words early)")
+def _():
+    td, d, lab = workdir()
+    with td:
+        w = scored(lab)[3]["boundaries"]["precision_within_words"]
+        assert [(x["near_misses"], x["precision"], x["near_miss_boundaries"]) for x in w] == [
+            (0, round(6 / 11, 4), []), (0, round(6 / 11, 4), []),
+            (2, round(8 / 11, 4), ["B-004", "B-010"])]
+
+
 # ------------------------------------------------------------------ CLI -----
 
 @check("CLI: exit 0, a summary, and a JSON with no transcript text in it")
@@ -263,6 +344,9 @@ def _():
         assert r.returncode == 0, r.stdout + r.stderr
         assert "boundaries: 12  real 6  spurious 5  unsure 1" in r.stdout
         assert "missed changes: 4; 2 misattribute 8 word(s); 1 put student speech" in r.stdout
+        assert "N=1 54.5% (+0), N=2 54.5% (+0), N=3 72.7% (+2)" in r.stdout, r.stdout
+        r2 = run(lab, "--speaker-map", f"{A}=L,{B}=S", "--near", "2")
+        assert r2.returncode == 0 and "N=2 54.5% (+0)\n" in r2.stdout, r2.stdout
         res = json.loads(out.read_text())
         assert res["words"]["accuracy"] == 0.6 and res["source_sha256"] == dl.sha256_file(d / "rec_raw.json")
         blob = out.read_text().lower()
