@@ -41,6 +41,14 @@ A *missed change* is a word where the true speaker changes and the rendered
 label does not. One that leaves no word misattributed (a return to the speaker
 the label already names) is counted, and reported apart.
 
+Boundary precision is also given *within N words* (N = 1 up to ``--near``): a
+spurious boundary whose true change lies within N words counts as a *near
+miss*, a boundary placed a word or two off rather than one with no change
+behind it. The pairing is one to one: a near miss is matched to a missed
+change (a change already at a boundary has been found), and no two boundaries
+share one change. Precision within N is (real + near misses) / (real +
+spurious).
+
 Pure Python, no model, no dependencies beyond stage 2 itself. The output holds
 counts, word indices, line ids and times, never transcript text.
 
@@ -178,6 +186,21 @@ def _ratio(a: int, b: int) -> Optional[float]:
     return round(a / b, 4) if b else None
 
 
+def near_misses(spurious: List[int], missed: List[int], n: int) -> List[int]:
+    """The spurious boundary positions matched one to one with missed changes within n words.
+
+    In word order, each boundary takes the earliest unmatched change in its
+    window. Every window is the same width, so no other pairing matches more.
+    """
+    taken, out = set(), []
+    for p in sorted(spurious):
+        q = next((q for q in sorted(missed) if p - n <= q <= p + n and q not in taken), None)
+        if q is not None:
+            taken.add(q)
+            out.append(p)
+    return out
+
+
 def score(labels: Dict[str, Any], stream: Stream, truth: List[Optional[str]],
           speaker_map: Dict[str, str], near: int = NEAR_WORDS) -> Dict[str, Any]:
     n = len(truth)
@@ -221,6 +244,16 @@ def score(labels: Dict[str, Any], stream: Stream, truth: List[Optional[str]],
             where = "no_true_change_nearby"
         row = cross.setdefault(b["verdict"] or "unlabeled", {})
         row[where] = row.get(where, 0) + 1
+
+    # Near misses: spurious boundaries a few words off a change the label missed.
+    missed_at = [p for p in changes if not label_changed(p)]
+    spurious_at = [pos[b["word_i"]] for b in bs if b["verdict"] == "spurious"]
+    within = []
+    for k in range(1, near + 1):
+        hits = near_misses(spurious_at, missed_at, k)
+        within.append({"words": k, "near_misses": len(hits),
+                       "precision": _ratio(verdicts["real"] + len(hits), decided),
+                       "near_miss_boundaries": [stream.boundary_at[p] for p in hits]})
 
     # Error runs: consecutive error words with one true speaker and one label.
     runs: List[Tuple[int, int, str]] = []
@@ -290,6 +323,7 @@ def score(labels: Dict[str, Any], stream: Stream, truth: List[Optional[str]],
             "spurious_split_rate": _ratio(verdicts["spurious"], decided),
             "precision_if_unsure_all_spurious": _ratio(verdicts["real"], len(bs) - unlabeled),
             "precision_if_unsure_all_real": _ratio(verdicts["real"] + verdicts["unsure"], len(bs) - unlabeled),
+            "precision_within_words": within,
             "verdict_vs_truth": cross,
         },
         "true_changes": {
@@ -329,6 +363,9 @@ def summary(r: Dict[str, Any]) -> List[str]:
         f"  precision (real / real+spurious): {pct(b['precision'])}; spurious splits {pct(b['spurious_split_rate'])}"
         f"; with unsure counted either way {pct(b['precision_if_unsure_all_spurious'])}"
         f"-{pct(b['precision_if_unsure_all_real'])}",
+        "  precision within N words (a spurious boundary within N words of a missed change is a near "
+        "miss): " + ", ".join(f"N={x['words']} {pct(x['precision'])} (+{x['near_misses']})"
+                               for x in b["precision_within_words"]),
         "  verdict vs. per-word truth: " + "; ".join(
             f"{v}: " + ", ".join(f"{k} {c}" for k, c in sorted(row.items()))
             for v, row in r["boundaries"]["verdict_vs_truth"].items()),
@@ -360,7 +397,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                    help="who each diarizer label is, e.g. SPEAKER_01=L,SPEAKER_00=S")
     p.add_argument("--source", default=None, help="the raw JSON, if not where the labels say")
     p.add_argument("--near", type=int, default=NEAR_WORDS,
-                   help=f"words either side for a 'displaced' boundary (default {NEAR_WORDS})")
+                   help="words either side for a 'displaced' boundary; precision within N words is "
+                        f"given for N = 1 to this (default {NEAR_WORDS})")
     p.add_argument("--allow-incomplete", action="store_true", help="score a sheet still being labeled")
     p.add_argument("--json", default=None, help="also write the numbers here")
     a = p.parse_args(argv)
