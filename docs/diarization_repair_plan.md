@@ -1,6 +1,6 @@
 # Diarization repair: plan and manual to-dos
 
-**Status:** plan. Build step 1 (the labeling sheet) is built; nothing else is. Decided 2026-09-30: speaker-attribution repair lives **here**,
+**Status:** plan. Build steps 1–3 are done: the labeling sheet, Mark's labels, and the baseline score (§1.7). Nothing else is built. Decided 2026-09-30: speaker-attribution repair lives **here**,
 upstream, not in any downstream consumer (D24 in `pipeline_plan.md`).
 **Part 1** is the design. **Part 2** is the manual work only Mark can do, including the
 labeling this plan needs before anything can be measured.
@@ -122,8 +122,8 @@ most of the way, the model pass isn't built.
    depends on this; build it first.**
 
    **Built** (2026-10-02) as one in-place read-through: `scripts/diarization_labels.py`; format in Part 2, item 1.
-2. Mark labels (Part 2, item 1).
-3. Score the baseline (§1.4, step 1).
+2. Mark labels (Part 2, item 1). **Done** (2026-10-02); converted to the checker's grammar, §1.7.
+3. Score the baseline (§1.4, step 1). **Done**: `scripts/score_diarization.py`; numbers in §1.7.
 4. Candidate generator; measure its recall.
 5. Model pass on candidates; score against the gate and the baseline.
 6. Only if 5 passes: the sidecar writer, render-time application, stamp fields, `check_render.py`
@@ -137,6 +137,95 @@ most of the way, the model pass isn't built.
   spurious labels means fewer boundaries to label.
 - §10, *Speaker identification from an enrolled embedding library*: it would also merge an
   over-split speaker, but it carries biometric-consent constraints this plan does not.
+
+### 1.7 Baseline (PSY777-F26-WK2-Mon)
+
+§1.4 step 1, scored 2026-10-02. The current stage 2 (`assign` plus `smooth` at the lecture
+profile's defaults, which is the render the sheet shows) is measured against Mark's labels.
+This section gives aggregate numbers only. The labels, and everything derived from them,
+stay in `transcripts/` (gitignored).
+
+**The gold.** Mark labeled in a richer notation than the checker's grammar:
+- diarizer labels as identities;
+- `>> change:` at every change, including returns;
+- `who:` on spurious boundaries;
+- two transcript lines split to show a mid-line change;
+- two verdicts written as `unknown; likely …`;
+- two typos.
+
+A converted copy beside the original (`<stem>_labels.normalized.md`) checks with 0 errors. It
+took 24 conversions, each logged with its line, its text before and after, and its rule. The
+original's sha256 is unchanged. The per-word speakers were rebuilt directly from the original
+under its own reading. They agree with the truth the scorer derives from the copy on all
+14,270 words. The two `unknown` verdicts are scored `unsure`. Mark's "likely" placements for
+them are kept in a notes sidecar and not used as truth.
+
+**Speaker map.** SPEAKER_01 is the instructor (`L`) and SPEAKER_00 is a student (`S`). A
+second student (`S2`) has no diarizer label of their own: the diarizer split their words
+between the two labels.
+
+```bash
+python3 scripts/score_diarization.py \
+    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.normalized.json \
+    --speaker-map SPEAKER_01=L,SPEAKER_00=S
+```
+
+**How the per-word truth is read off the sheet.** The script's docstring has the full rule:
+- the first word belongs to its label's speaker;
+- a `real` boundary starts its `who:`, or the new label's speaker if `who:` is empty;
+- a `spurious` boundary changes nothing;
+- a marker starts its speaker;
+- `unsure` leaves the speaker unknown until a `real` boundary or a marker names one.
+
+Unknown words are excluded from every per-word number. A **missed change** is a word where the
+true speaker changes and the rendered label does not.
+
+| Measure | Value |
+|---|---|
+| Diarizer boundaries | 68: real 7, spurious 59, unsure 2 |
+| Boundary precision (real / (real + spurious)) | 7/66 = **10.6%**, so 89.4% are spurious splits (10.3–13.2% with the 2 unsure counted either way) |
+| Spurious boundaries with no true change within 3 words | 51 of 59; the other 8 sit 1–3 words from a change they misplace |
+| True speaker changes | 17: 5 at a boundary, **12 missed** |
+| Missed changes that misattribute words | 8, covering 19 words. In the other 4, the label is already right from that word on: a return to the speaker the label names, or the far side of a misplaced boundary |
+| … that put student speech inside the instructor's turn | **4 changes, 10 words** |
+| Missed changes within 3 words of a diarizer boundary | 9 of 12 |
+| Words scored | 14,027 of 14,270 (243 excluded: the window after the two `unsure` boundaries) |
+| Per-word attribution accuracy | **98.8%** (170 words wrong) |
+| Student words attributed to the instructor | **12** of 156 student words (7.7%): 10 through missed changes, 2 through a spurious split |
+| Instructor words under the student's label | 143 (134 through spurious splits, 9 through missed changes) |
+| One student's words under the other's label | 15 |
+
+**What it says.**
+- **Per-word accuracy hides the problem.** The instructor speaks 13,871 of the 14,027 scored
+  words. A diarizer that printed every word as the instructor's would score 98.9%, slightly
+  better than the real 98.8%. The student-side numbers are the ones to watch.
+- **Spurious splits make up almost all of the boundaries:** 59 of the 66 that have a verdict.
+  143 of the 304 words rendered under the student's label are the instructor's. This is what
+  is left *after* smoothing.
+- **The high-harm direction is small in words but present.** 12 student words, 7.7% of what
+  students said, print as lecture content. 10 of them come from 4 missed changes. This is the
+  error §1.4's gate and the merge repair exist for.
+- **Most missed changes are misplaced boundaries.** 9 of the 12 lie within 3 words of an
+  existing boundary, and 8 spurious boundaries sit 1–3 words from the change they misplace.
+  §1.3's candidate list has no "shift an existing boundary by a few words" class. On this
+  lecture, most misses would fall in that class. Step 4 should measure its recall alongside the
+  listed candidate types.
+
+**Caveats.**
+- This is one lecture and one labeler. The high-harm counts are small (4 changes, 12 words).
+- Mark has open questions in the gitignored `<stem>_labels.questions.md`:
+  - the excluded window around B-027/B-028;
+  - which student speaks at one boundary;
+  - whether a boundary a word or two off a change is `real`. B-005 is labeled `real`, while 8
+    of the same shape are labeled `spurious`. Under a strict reading precision is 9.1%; under a
+    lenient one it is 22.7%;
+  - one stretch of the instructor's run that may hold an unmarked student exchange. If it does,
+    the high-harm count rises.
+
+**The sheet's grammar.** The conversion was needed because Mark's notation was more natural
+than the checker's. A grammar revision for future sheets (a speaker map in the header, a
+`>> change:` that sets the speaker in either direction, a `note:` field) is proposed in PR #26,
+along with the ambiguities it would introduce. It is not adopted.
 
 ---
 
@@ -202,6 +291,10 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
      stream.
    - The labels stay in `transcripts/` (gitignored). They describe a class session with student
      voices, so they are not committed alongside the public fixture.
+   - **Done** 2026-10-02. The sheet used a richer notation than the checker accepts. A converted
+     copy (`<stem>_labels.normalized.md`) checks clean, and the original is untouched. The
+     conversion and the baseline it fed are in §1.7. Open questions for Mark are in
+     `<stem>_labels.questions.md`.
 
 ### For the study-notes benchmark (`~/.config/skillshare`)
 
