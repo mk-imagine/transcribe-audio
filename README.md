@@ -263,6 +263,7 @@ python3 tests/check_annotate.py    # 18: the fluent view, the conjunction, disfl
 python3 tests/check_rename.py      # 13: the recording-renaming script
 python3 tests/check_labels.py      # 38: the diarization labeling sheet, generated and read back
 python3 tests/check_score.py       # 17: the diarization baseline score and its near-miss view, on hand-worked synthetic lectures
+python3 tests/check_candidates.py  # 27: the diarization repair candidates, every class on synthetic records, and their recall score
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified
