@@ -1,6 +1,6 @@
 # Diarization repair: plan and manual to-dos
 
-**Status:** plan. Build steps 1–3 are done: the labeling sheet, Mark's labels, and the baseline score (§1.7). Nothing else is built. Decided 2026-09-30: speaker-attribution repair lives **here**,
+**Status:** plan. Build steps 1–4 are done: the labeling sheet, Mark's labels, the baseline score (§1.7), and the candidate generator's recall (§1.8). **Step 4 fails its pre-registered bar** on one of five high-harm misses, so step 5 waits on a decision (§1.8). Nothing else is built. Decided 2026-09-30: speaker-attribution repair lives **here**,
 upstream, not in any downstream consumer (D24 in `pipeline_plan.md`).
 **Part 1** is the design. **Part 2** is the manual work only Mark can do, including the
 labeling this plan needs before anything can be measured.
@@ -124,7 +124,10 @@ most of the way, the model pass isn't built.
    **Built** (2026-10-02) as one in-place read-through: `scripts/diarization_labels.py`; format in Part 2, item 1.
 2. Mark labels (Part 2, item 1). **Done** (2026-10-02); converted to the checker's grammar, §1.7.
 3. Score the baseline (§1.4, step 1). **Done**: `scripts/score_diarization.py`; numbers in §1.7.
-4. Candidate generator; measure its recall.
+4. Candidate generator; measure its recall. **Built and measured** (2026-10-02):
+   `scripts/diarization_candidates.py`, pre-registered in `docs/diarization_candidates_plan.md`
+   and scored by `scripts/score_candidates.py`. Results are in §1.8. The bar fails: 4 of 5
+   high-harm misses are surfaced.
 5. Model pass on candidates; score against the gate and the baseline.
 6. Only if 5 passes: the sidecar writer, render-time application, stamp fields, `check_render.py`
    cases, and a real re-render of the labeled lecture.
@@ -271,6 +274,189 @@ than the checker's. A grammar revision for future sheets (a speaker map in the h
 along with the ambiguities it would introduce. It is not adopted. Mark's answer 3 now defines
 `real` and `spurious` for a boundary a few words off its change, and a revision should state
 that definition in the sheet's instructions.
+
+### 1.8 Step 4: candidate recall (PSY777-F26-WK2-Mon)
+
+§1.4 step 2, measured 2026-10-02 on the same gold as §1.7. **The classes, parameters, metrics
+and bar were pre-registered before the generator was written or run**, in
+`docs/diarization_candidates_plan.md`. That file is the spec, and it stays unedited. Order
+of commits on the branch:
+1. the pre-registration;
+2. the generator, scorer and checks;
+3. this section.
+
+The run reported here uses the pre-registered parameters exactly (the scorer checks this, and
+reports `params pre-registered: True`). **No parameter or definition was changed after the
+results were seen**, so there are no post-hoc numbers to report. Aggregate numbers and word
+indices only. The candidates and the score stay in `transcripts/`.
+
+```bash
+python3 scripts/diarization_candidates.py transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json
+python3 scripts/score_candidates.py \
+    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.normalized.json \
+    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_speaker_candidates.json \
+    --speaker-map SPEAKER_01=L,SPEAKER_00=S
+```
+
+**What the generator does.** It regenerates the render the gold was labeled on (lecture
+profile, `assign` plus `smooth`). It writes `<stem>_speaker_candidates.json`: windows of words,
+each with a class and its evidence. Overlapping windows are merged into **sites**, and one
+site is one model judgment in step 5. There are eleven classes:
+- `shift`: every boundary ±3 words (§1.7's near misses).
+- Five split classes from §1.3, all at boundaries.
+- `dropped_raw_change`: a raw turn's label that no rendered word carries within 3 words
+  (§1.7's dropped run).
+- Four merge classes from §1.3: `question_answer`, `backchannel`, `address_reply`,
+  `register_change`.
+
+A window `[a, b]` surfaces the error at transition t iff `a < t ≤ b`. It is stdlib only,
+deterministic, and writes no transcript text. Raw `speaker_turns` are only read (D3).
+
+**Against the bar.**
+
+| Bar (pre-registered) | Value | |
+|---|---|---|
+| High-harm recall = 100% | **4/5 = 80%** | **fails** |
+| ≤ 180 sites per audio hour | 110.2 (172 sites over 1.56 h) | passes |
+| ≤ 25% of words inside a window | 9.3% (1,323 of 14,270) | passes |
+
+**The bar fails.** By §1.4's rule, the reason is below. Nothing was tuned to pass it.
+
+**Recall.**
+
+| Errors | Surfaced | Recall |
+|---|---|---|
+| All errors (16 missed changes + 62 spurious boundaries) | 76/78 | 97.4% |
+| Missed changes | 14/16 | 87.5% |
+| … that misattribute words | 9/10 | 90.0% |
+| Spurious boundaries | 62/62 | 100%, by construction (`shift` has a window at every boundary) |
+| High-harm misses (student speech inside the instructor's turn) | **4/5** | **80%**: 48 of the 54 words |
+
+**Volume.**
+
+| Measure | Value |
+|---|---|
+| Candidates | 384 (246.1 per audio hour) |
+| Sites (one judgment each) | 172 (110.2 per audio hour) |
+| Words covered | 1,323 of 14,270 (9.3%) |
+| Site length, in words | median 8, p90 14, max 38 |
+| Windows that hold an error | candidates 211/384 (54.9%); sites 35/172 (20.3%) |
+| Sites that hold a rendered boundary | 36, and 33 of them hold an error |
+| Sites with no boundary | 136, holding 795 words; **2** of them hold an error |
+| `real` boundaries inside a window | 6/6: six judgments that should come back "different speaker" |
+
+**Per class.**
+- *Holds an error* is the share of the class's windows that surface at least one error.
+- *Alone* counts the errors surfaced by this class and no other: missed / spurious / high-harm.
+- The missed column counts 16 changes, the misattributing column 10, spurious 62 and
+  high-harm 5.
+
+| Class | Cand. | /h | Words | Holds an error | Missed | Misattr. | Spurious | High-harm | Alone |
+|---|---|---|---|---|---|---|---|---|---|
+| `shift` | 68 | 43.6 | 438 | 63/68 | 11 | 7 | 62 | 3 | 2 / 1 / **1** |
+| `long_island` | 9 | 5.8 | 76 | 9/9 | 1 | 1 | 17 | 0 | 0 |
+| `edge_island` | 23 | 14.7 | 158 | 23/23 | 3 | 3 | 43 | 1 | 0 |
+| `no_punct_lowercase` | 49 | 31.4 | 97 | 49/49 | 0 | 0 | 49 | 0 | 0 |
+| `zero_gap` | 15 | 9.6 | 30 | 15/15 | 0 | 0 | 15 | 0 | 0 |
+| `inside_sentence` | 32 | 20.5 | 64 | 32/32 | 0 | 0 | 32 | 0 | 0 |
+| `dropped_raw_change` | 80 | 51.3 | 764 | 15/80 | 10 | 6 | 14 | 3 | 0 |
+| `question_answer` | 4 | 2.6 | 47 | 0/4 | 0 | 0 | 0 | 0 | 0 |
+| `backchannel` | 12 | 7.7 | 31 | 5/12 | 5 | 3 | 0 | 1 | 0 |
+| `address_reply` | 5 | 3.2 | 10 | 0/5 | 0 | 0 | 0 | 0 | 0 |
+| `register_change` | 87 | 55.8 | 159 | 0/87 | 0 | 0 | 0 | 0 | 0 |
+| *everything but `shift`* | 316 | 202.5 | 1,150 | 148/316 | 12 | 8 | 61 | 3 | 3 / 0 / **1** |
+
+`dropped_raw_change` by kind:
+
+| Kind | Windows | Hold an error | High-harm surfaced |
+|---|---|---|---|
+| `displaced` | 9 | 8 | 2 |
+| `outvoted` | 50 | 6 | 1 |
+| `empty` | 19 | 1 | 0 |
+| `smoothed` | 2 | 0 | 0 |
+
+**Every high-harm miss.** *Words* is the length of the misattributed run. *Boundary* is the
+distance to the nearest rendered boundary.
+
+| Word | Time | Words | Boundary | Start surfaced by | Return surfaced by | One site holds the run |
+|---|---|---|---|---|---|---|
+| 2277 | 00:13:53.7 | 1 | 1 | `shift` only | `shift`, `no_punct_lowercase`, `inside_sentence` | yes |
+| 2330 | 00:14:12.0 | 1 | 1 | `shift`, `edge_island`, `dropped_raw_change` | six classes | yes |
+| 2897 | 00:18:22.6 | 2 | 2 | `shift`, `dropped_raw_change` | six classes | yes |
+| 2954 | 00:18:39.1 | 6 | 7 | **nothing** | `shift` | no |
+| 4553 | 00:28:47.2 | 44 | 12 | `dropped_raw_change`, `backchannel` | **nothing** | no |
+
+**Missed changes no class surfaces.**
+- **2954 (00:18:39.1), instructor → second student, 6 words, high-harm.**
+  - It starts mid-sentence. The instructor's last word before it ends in a comma, and the gap
+    is 0.24 s, under the 0.5 s pause, so `segment.py` makes no sentence break.
+  - Every raw turn over it is SPEAKER_01, so nothing was dropped.
+  - The nearest boundary is 7 words later, outside `shift`'s ±3.
+  - The text does carry two §1.3 cues: a backchannel token, then a first-person token. But
+    every merge class is anchored on a sentence start or a whole sentence, so a cue
+    mid-sentence fires none of them.
+- **4597 (00:29:02.2), student → instructor, 0 words: the return out of the 44-word exchange.**
+  - The student's turn ends in a question, and the instructor answers after a 0.68 s pause.
+  - The answer opens with `so`, which the pre-registered opener list leaves out on purpose.
+    It is the lecture's commonest sentence opener. So `question_answer` doesn't fire.
+  - The raw turns over it are SPEAKER_01 only, and the nearest boundary is 56 words away.
+
+**What it says.**
+- **Signals (a) and (b) carry the high-harm recall, not §1.3's text cues.**
+  - `shift` surfaces the three high-harm misses that sit 1–2 words from a boundary. As §1.7
+    predicted, it surfaces 11 of the 16 missed changes, and one high-harm miss (2277) is
+    surfaced by `shift` alone.
+  - The 44-word exchange is surfaced through its first word. Two things catch it:
+    - a raw SPEAKER_00 turn that lost that word to SPEAKER_01 by 5 ms of overlap (0.285 s
+      against 0.290 s; `dropped_raw_change`);
+    - the same word standing as a one-word mid-run sentence (`backchannel`).
+  - The four merge classes surface 1 high-harm miss between them, and it is that same one.
+- **The split classes add judgment evidence, not recall.** All five sit at boundaries, inside
+  `shift`'s windows, so they add no site and surface nothing alone. Their windows "hold an
+  error" 100% of the time only because 62 of the 68 boundaries are spurious. That says
+  nothing yet about whether they tell real from spurious. That is step 5's question.
+- **The off-boundary search is costly:** 136 of the 172 sites, for 2 sites that hold an error.
+  - `register_change` (87 candidates), `question_answer` (4) and `address_reply` (5) surface
+    nothing here.
+  - `dropped_raw_change` earns its volume only in its `displaced` (8 of 9 hold an error) and
+    `outvoted` kinds.
+  - This is one lecture. It is not grounds to drop a class (see the caveat below).
+- **A start without an end is half a candidate.** The 44-word exchange's window is 9 words
+  long, and nothing surfaces where the student stops. A step-5 judgment on that window could
+  split out the first word, but not the student's turn. So a merge candidate needs either
+  context that reaches the run's end, or a paired candidate at the return.
+
+**Why the bar fails** (§1.4's rule). The one unsurfaced high-harm miss has no signal of any
+registered kind where it starts:
+- no boundary within 3 words;
+- no raw-turn dissent;
+- no sentence break.
+
+The textual cue is there, but every merge class reads whole sentences, and this one starts
+after a comma. This is a gap in the class definitions. It is not a parameter at the edge of
+its range, so no N or window size within reason would have surfaced it.
+
+**What is needed to proceed** (Mark's decision; nothing here is adopted):
+- **Correct path: a held-out measurement.** Label one PSY498 lecture (Part 2, item 1's
+  procedure). On it, score the generator above unchanged; that is the unbiased estimate of
+  this one. Score alongside it a revised generator, pre-registered before that lecture is
+  labeled. The revisions this lecture suggests, all post-hoc and so all unproven here:
+  - merge cues anchored on clause boundaries (a comma or a short gap) as well as sentences;
+  - a paired return candidate for each merge candidate;
+  - possibly dropping the classes that earned nothing.
+- **Stopgap, if step 5 is to start before then:** accept the 80% high-harm recall explicitly
+  as a known residual, and record the unsurfaced 6 words as the floor no repair can reach.
+  That changes a pre-registered bar after seeing the result, so it is Mark's call, and it
+  would be logged as such.
+
+**Caveats.**
+- **One lecture is both the design set and the evaluation set,** so these recall numbers are
+  optimistic. `shift` and `dropped_raw_change` were added because of this gold, and N = 3 is
+  the window it was read with. Even so, the generator fails on this lecture.
+- **The high-harm count is 5,** and one exchange is 44 of the 54 words. Each high-harm miss
+  moves recall by 20 points.
+- **"Surfaced" is a necessary condition for a repair, not a sufficient one.** Step 5 still has
+  to judge each site correctly, and the gate (zero false merges introduced) applies there.
 
 ---
 
