@@ -369,7 +369,7 @@ counts it: a long exchange counts once.
   explicitly, record the unsurfaced words as the floor no repair can reach, and log it as a
   change to the bar made after the result was seen.
 
-### 6.6 The speaker map, from the labels alone
+### 6.6 The speaker map, from the labels alone (amended, A2)
 
 `score_diarization.py` reads the map in three places:
 - the first word's speaker;
@@ -378,37 +378,46 @@ counts it: a long exchange counts once.
   high-harm error is a student's word under a label that maps to `L`.
 
 Every rendered label must be mapped. For PSY498 the map is `--speaker-map auto`. It is computed
-from Mark's labels and the rendered stream, never from candidates:
+from Mark's labels and the rendered stream. It never reads candidates, and it never reads a
+map:
 
-1. **Start:** the rendered label with the most words maps to `L`. Ties go to the label name
-   that sorts first. Every other label maps to `S`.
-2. **Truth:** derive the per-word truth with the current map (`derive_truth`). Count only
-   known words: `L`, `S` or `S2`–`S9`, not unknown and not `?`. For each label X, nL(X) is the
-   instructor's words under X and nS(X) the students' words under X; NL and NS are the totals.
-3. **Map:**
-   - If NS = 0, every label maps to `L`.
-   - Otherwise X maps to `L` iff nL(X)·NS ≥ nS(X)·NL: X holds at least as large a share of all
-     the instructor's words as of all the students' words. Ties go to `L`, the direction that
-     counts more high-harm errors.
-   - Otherwise X maps to the student identity with the most words under X. Ties go to `S`, then
+1. **Stated words.** Derive the per-word truth with an *empty* map. A word's speaker is then
+   known only where the labels state it:
+   - a marker sets it;
+   - a `real` boundary's `who:` sets it;
+   - either one carries across `spurious` boundaries until the next `real` boundary or marker.
+
+   Two kinds of word have no stated speaker and are not counted: the words before the first such
+   statement, and the words after a `real` boundary whose `who:` is empty. Neither are `?`
+   words.
+2. **Counts.** For each rendered label X, nL(X) is the stated instructor words under X and
+   nS(X) the stated student words (`S`, `S2`–`S9`). NL and NS are the totals.
+3. **Map.** X's instructor share is nL(X)/NL and its student share nS(X)/NS, each 0 when its
+   total is 0.
+   - X maps to `L` iff its instructor share is at least its student share. Ties go to `L`, the
+     direction that counts more high-harm errors. So a label with no stated word maps to `L`,
+     and with no stated student every label does.
+   - Otherwise X maps to the student with the most stated words under X. Ties go to `S`, then
      `S2` … `S9`.
-4. **Repeat** steps 2–3 until the map stops changing. If it has not settled after 10 rounds,
-   the scorer refuses. Mark then states the map in writing, logged as an operator answer, before
-   any candidate file for the lecture is generated.
+4. **Refusal.** The scorer refuses when a label has no stated word and a `real` boundary with an
+   empty `who:` opens a turn under it. Then the labels leave that label's identity entirely to
+   the map, and the map has nothing to go on. Mark fills that `who:` before any candidate file is
+   generated: an operator answer, logged in a converted copy as §1.7 did.
 
 Why this rule:
-- **Not plurality.** On PSY777, SPEAKER_00's rendered words are 159 instructor and 145
-  student, so a plurality rule would map the student's label to `L`. The share rule gives
-  SPEAKER_01=L, SPEAKER_00=S, the map §1.7 used, and it settles in one round. Verified in scratch
-  against the normalized gold.
+- **Not plurality.** On PSY777, SPEAKER_00's stated words are 155 instructor and 145 student,
+  so a plurality rule would map the student's label to `L`. The share rule gives
+  SPEAKER_01=L, SPEAKER_00=S, the map §1.7 used. 11,993 of the 14,270 words are stated there;
+  the first 2,277 come before any statement.
 - **Not one to one,** as diarization error rate maps labels. A lecturer split across two
   labels is one person, and a render's speaker map would name both as the lecturer. Mapping one
   of them to a student would hide every student word under it from the high-harm count.
-- **Why a loop:** the truth reads the map at the first word and at an empty `who:`. A
-  provisional map, checked against the truth it produces, settles that without asking anyone.
+- **Not the map's own output.** The truth reads the map at the first word and at every empty
+  `who:`. A map checked against a truth it produced can confirm a wrong guess (A2). Counting
+  stated words only removes that dependence.
 
-It works for any number of labels. The resolved map and each label's counts are written into
-the score JSON.
+It works for any number of labels. The resolved map, each label's stated counts, and the
+`real` boundaries left without a `who:` are written into the score JSON.
 
 ### 6.7 Commands
 
@@ -455,3 +464,25 @@ instead. Aggregate numbers and word indices go into the repair plan. Everything 
 
 No definition, parameter or rule changes. §3 and 6.1 now carry the corrected hash, and §3 also
 lists the JSON's keys, which the hash depends on.
+
+**A2 (2026-10-05, while building, before v2 was scored on PSY777).** The speaker-map rule in
+6.6 was replaced.
+
+- **What was registered:** start from a guess, iterate to a fixed point. The guess mapped the
+  label with the most words to `L` and the others to `S`. Each round derived the truth with the
+  current map, applied the share rule, and repeated until the map stopped changing.
+- **Why it is unworkable:** the truth it checks against reads the map at the first word and at
+  every empty `who:`, so a wrong guess can confirm itself. The checks found a case while
+  building: a synthetic lecture whose lecturer is split across two labels, the smaller one
+  speaking first (`TWO_LECTURER_RECORD` in `tests/check_score.py`). The guess maps the
+  lecturer's first label to `S`, the first segment's words then read as a student's, and the
+  rule settles there. That label's student words would leave the high-harm count. A lecturer
+  split across labels is the case the rule exists for (pipeline_plan §10: label counts grow
+  with duration).
+- **A second guess has the mirror failure.** Starting with every label as `L` fixes that
+  record. But it settles on `L` for a student's label whose turns all carry an empty `who:`.
+- **The replacement:** the share rule applied to the words the labels state, with no guess and
+  no loop, plus a refusal where nothing is stated (6.6).
+- **What it changes:** on PSY777 all three rules give the map §1.7 used, SPEAKER_01=L,
+  SPEAKER_00=S. The rule is part of the held-out protocol. It does not touch the candidate
+  generator, so v2's definitions, parameters and hash are unchanged.
