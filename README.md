@@ -262,8 +262,8 @@ python3 tests/check_render.py      # 27: stage 2 against the fixture
 python3 tests/check_annotate.py    # 18: the fluent view, the conjunction, disfluency tags, annotate.py end to end
 python3 tests/check_rename.py      # 13: the recording-renaming script
 python3 tests/check_labels.py      # 38: the diarization labeling sheet, generated and read back
-python3 tests/check_score.py       # 17: the diarization baseline score and its near-miss view, on hand-worked synthetic lectures
-python3 tests/check_candidates.py  # 27: the diarization repair candidates, every class on synthetic records, and their recall score
+python3 tests/check_score.py       # 23: the diarization baseline score, its near-miss view and the auto speaker map, on hand-worked synthetic lectures
+python3 tests/check_candidates.py  # 47: the diarization repair candidates, v1 frozen byte for byte and v2, every class on synthetic records, and their recall score
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified
@@ -288,6 +288,9 @@ src/
 docs/
   pipeline_plan.md          THE design document: decision log D1–D23, measured model facts, the bug queue
   environments.md           the cluster: access, mamba envs, partitions, reference audio
+  diarization_repair_plan.md         speaker-attribution repair (D24): design, measurements, Mark's to-dos
+  diarization_candidates_plan.md     the repair candidates, v1: pre-registration (frozen)
+  diarization_candidates_v2_plan.md  the repair candidates, v2: pre-registration and the held-out protocol
 tests/                      the check suites and the fixture
 scripts/rename_recordings.py  recorder files -> PSY<code>-<term>-WK<N>-<Day> names, from the SEMESTERS table
 envs/cw2diar.sh             recipe for the combined CrisperWhisper + pyannote env
