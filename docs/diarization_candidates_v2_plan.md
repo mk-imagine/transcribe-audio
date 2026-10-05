@@ -225,10 +225,19 @@ same hash v1 uses) holds, beside the values above:
 - `"version": 2`;
 - `"classes"`, the thirteen classes in output order.
 
+Its keys are:
+- v1's `near_words`, `zero_gap_s`, `island_max_words`, `backchannel_max_words`,
+  `address_max_words`, `answer_openers`, `backchannel`, `second_person`, `solicit` and
+  `solicit_bigrams`;
+- `question_answer_openers`, `clause_punct`, `clause_pause_s`, `fillers`, `pair_max_words`,
+  `pair_return_from` and `pair_start_from`;
+- `version` and `classes`.
+
 So the class set is part of the hash. With the lexicons exactly as v1's, sorted, and the lists
 in the orders above, **v2's `params_sha256` is
-`09c06bfa4e74058b9b3f55dd0525804b506a714ba9649ae5a704a233b8685405`.** The scorer reports
-whether a candidate file carries its version's registered parameters.
+`0c77f39da15c71b6ac5c51a75ea5aaa3dda8aa8edf76be9035a6ce58dc267fa6`** (corrected by
+amendment A1, §8: the hash first registered here was computed without `FILLERS`). The scorer
+reports whether a candidate file carries its version's registered parameters.
 
 ## 4. Metrics
 
@@ -293,7 +302,8 @@ Overall recall is reported, not gated. If the bar fails, v1 §5 applies: report 
    4. Generate v1 (`--version 1`) and v2 (`--version 2`). Check the parameter hashes and
       refuse anything else:
       - v1 `fd44dbfe718e24b8dd9b6c8afbc0b1ed1c0a26c453228148d1d26a2d702730b6`, PR #29's;
-      - v2 `09c06bfa4e74058b9b3f55dd0525804b506a714ba9649ae5a704a233b8685405`, §3's.
+      - v2 `0c77f39da15c71b6ac5c51a75ea5aaa3dda8aa8edf76be9035a6ce58dc267fa6`, §3's (as
+        amended, A1).
    5. Score both with `score_candidates.py`, on the same labels and the same map. **Both are
       reported.**
 
@@ -434,4 +444,14 @@ instead. Aggregate numbers and word indices go into the repair plan. Everything 
 
 ## 8. Amendments
 
-None.
+**A1 (2026-10-05, before any v2 code was written or run).** The hash in §3 was wrong.
+- **What was wrong:** it was computed from a parameter JSON that left out `FILLERS`, which was
+  added to R3 and to §3's table while this file was being written, after the hash had been
+  computed.
+- **What it should be:** the JSON that §3 describes, with `"fillers": ["uh", "um"]`, hashes to
+  `0c77f39da15c71b6ac5c51a75ea5aaa3dda8aa8edf76be9035a6ce58dc267fa6`.
+- **What was first registered:**
+  `09c06bfa4e74058b9b3f55dd0525804b506a714ba9649ae5a704a233b8685405`.
+
+No definition, parameter or rule changes. §3 and 6.1 now carry the corrected hash, and §3 also
+lists the JSON's keys, which the hash depends on.
