@@ -392,6 +392,144 @@ def _():
         assert r.returncode == 2 and "no longer matches" in r.stderr, r.stderr
 
 
+# ---------------------------------------------------------- speaker map -----
+#
+# --speaker-map auto: the rule pre-registered in
+# docs/diarization_candidates_v2_plan.md §6.6, as amended (A2). It counts only
+# the words whose speaker the labels state. Each record below is built so that
+# one part of the rule decides it.
+
+C = "SPEAKER_02"
+
+# B is a student's label that a spurious split fills with the lecturer's
+# words: 6 stated as the lecturer's against 5 stated as the student's, so
+# plurality would say L. Its share of the student's words is the larger.
+SPLIT_RECORD = [
+    (A, "Today we study memory and its limits.", "L L L L L L L", None),
+    (B, "Is that on the exam?", "S S S S S", ("real", "S")),
+    (A, "Yes it is.", "L L L", ("real", "L")),
+    (B, "And then the cortex stores them.", "L L L L L L", ("spurious", "")),
+    (A, "Over weeks of sleep and more.", "L L L L L L", ("spurious", "")),
+]
+
+# The lecturer under two labels, the smaller one first (A, then C), and one
+# student word under C. The rule first registered here guessed the larger
+# label as the lecturer, took the first word's speaker from that guess, and
+# settled on A as a student; amendment A2 exists because of this record.
+TWO_LECTURER_RECORD = [
+    (A, "Today we study memory.", "L L L L", None),
+    (B, "Is it on the exam?", "S S S S S", ("real", "S")),
+    (A, "Yes it is.", "L L L", ("real", "L")),
+    (C, "Now the second half begins.", "L L L L L", ("spurious", "")),
+    (C, "Sleep helps okay thanks.", "L L S S", '>> change: S "okay"'),
+    (C, "So that is all.", "L L L L", ">> back: L"),
+]
+
+# Nobody but the lecturer speaks; B is all spurious. Nothing is stated.
+NO_STUDENT_RECORD = [
+    (A, "Today we study memory.", "L L L L", None),
+    (B, "And its limits.", "L L L", ("spurious", "")),
+    (A, "Then sleep.", "L L", ("spurious", "")),
+]
+
+# A student's label holds the most words; every speaker but the first is stated.
+BIG_STUDENT_RECORD = [
+    (A, "Today we start.", "L L L", None),
+    (B, "I will present my project in some detail today for you all.", " ".join(["S"] * 12), ("real", "S")),
+    (A, "Thanks that was great.", "L L L L", ("real", "L")),
+    (B, "One more point from me on the last slide here please.", " ".join(["S"] * 11), ("real", "S")),
+    (A, "Good we move on.", "L L L L", ("real", "L")),
+]
+
+# The lecturer is never stated (the return is stated as unknown, ?). Only the
+# student is, so B is S and A, with no stated student word, is L.
+NO_LECTURER_STATED_RECORD = [
+    (A, "Today we study memory.", "L L L L", None),
+    (B, "Is it on the exam?", "S S S S S", ("real", "S")),
+    (A, "Yes it is.", "? ? ?", ("real", "?")),
+]
+
+# B's only turn is a real boundary with an empty who: nothing says who B is.
+UNSTATED_RECORD = [
+    (A, "Today we study memory.", "L L L L", None),
+    (B, "Is it on the exam?", "S S S S S", ("real", "")),
+    (A, "Yes it is.", "L L L", ("real", "L")),
+]
+
+
+def auto_map(record):
+    td, d, lab = workdir(record=record)
+    with td:
+        labels = json.loads(lab.read_text())
+        stream = sd.rendered_stream(labels, lab)
+        m, rule = sd.derive_speaker_map(labels, stream)
+        truth = sd.derive_truth(labels, stream, m)
+    want = [None if t == "U" else t for _, _, ts, _ in record for t in ts.split()]
+    assert truth == want, "the truth under the derived map is not the record's"
+    return m, rule
+
+
+@check("auto map: the record above gives the map its checks use, from the words the labels state")
+def _():
+    m, rule = auto_map(RECORD)
+    assert m == MAP and rule["real_boundaries_without_who"] == ["B-006", "B-012"]
+    la, lb = rule["labels"][A], rule["labels"][B]
+    assert (la["stated_instructor_words"], la["stated_student_words"]) == (9, 8)
+    assert lb["stated_by_who"] == {"L": 3, "S": 7, "S2": 4}
+    assert (rule["stated_words"], rule["unstated_words"]) == (31, 18)
+
+
+@check("auto map: a student's label full of the lecturer's words is still the student's (share, not plurality)")
+def _():
+    m, rule = auto_map(SPLIT_RECORD)
+    assert m == {A: "L", B: "S"}
+    assert rule["labels"][B]["stated_by_who"] == {"L": 6, "S": 5}
+
+
+@check("auto map: a lecturer split across two labels, the smaller first, maps to L twice")
+def _():
+    m, _ = auto_map(TWO_LECTURER_RECORD)
+    assert m == {A: "L", B: "S", C: "L"}
+
+
+@check("auto map: a student's label holding the most words; no student at all; no lecturer stated")
+def _():
+    assert auto_map(BIG_STUDENT_RECORD)[0] == {A: "L", B: "S"}
+    m, rule = auto_map(NO_STUDENT_RECORD)
+    assert m == {A: "L", B: "L"} and rule["stated_words"] == 0
+    m, rule = auto_map(NO_LECTURER_STATED_RECORD)
+    assert m == {A: "L", B: "S"} and rule["instructor_words"] == 0
+
+
+@check("auto map refuses a label the labels leave entirely to the map")
+def _():
+    td, d, lab = workdir(record=UNSTATED_RECORD)
+    with td:
+        labels = json.loads(lab.read_text())
+        try:
+            sd.derive_speaker_map(labels, sd.rendered_stream(labels, lab))
+            raise AssertionError("a label with no stated word was mapped")
+        except SystemExit as exc:
+            assert B in str(exc) and "B-001" in str(exc)
+        r = run(lab, "--speaker-map", "auto")
+        assert r.returncode == 2 and "who: empty" in r.stderr, r.stderr
+
+
+@check("CLI: --speaker-map auto prints the map, records the rule, and scores as the given map does")
+def _():
+    td, d, lab = workdir()
+    with td:
+        out_a, out_g = d / "auto.json", d / "given.json"
+        ra = run(lab, "--speaker-map", "auto", "--json", out_a)
+        rg = run(lab, "--speaker-map", f"{A}=L,{B}=S", "--json", out_g)
+        assert ra.returncode == 0 and rg.returncode == 0, ra.stderr + rg.stderr
+        assert f"speaker map (auto): {A}=L,{B}=S" in ra.stdout
+        a, g = json.loads(out_a.read_text()), json.loads(out_g.read_text())
+        assert a["speaker_map_rule"]["stated_words"] == 31 and g["speaker_map_rule"] == "given"
+        drop = ("speaker_map_rule",)
+        assert {k: v for k, v in a.items() if k not in drop} == {k: v for k, v in g.items() if k not in drop}
+
+
 def main():
     for n in PASSED: print(f"  ok    {n}")
     for n, e in FAILED: print(f"  FAIL  {n}\n          {e}")

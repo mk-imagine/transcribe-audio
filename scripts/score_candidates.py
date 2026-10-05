@@ -9,7 +9,10 @@
 Build step 4 of docs/diarization_repair_plan.md (§1.5): the recall of the
 candidate generator (``diarization_candidates.py``) against the gold, §1.4 step
 2. The metrics and the bar were pre-registered in
-docs/diarization_candidates_plan.md (§4, §5); this implements them.
+docs/diarization_candidates_plan.md (§4, §5); this implements them, for v1's
+candidates and v2's alike (v2 plan §4, §5: the same metrics and bar, plus the
+high-harm return metrics, reported and not gated). ``--speaker-map auto``
+derives the map from the labels (v2 plan §6.6).
 
 The gold is read exactly as ``score_diarization.py`` reads it (its stream, its
 per-word truth, its missed changes). Every error is a *transition* t, the point
@@ -53,6 +56,7 @@ from pipeline import schema  # noqa: E402
 # The pre-registered bar (plan §5).
 BAR = {"high_harm_recall": 1.0, "max_sites_per_hour": 180.0, "max_words_covered_share": 0.25}
 KINDS = ("missed", "missed_misattributing", "spurious", "high_harm")
+_HOW_MANY = {1: "one", 2: "both", 3: "all three", 4: "all four", 5: "all five", 6: "all six"}
 
 
 def surfaces(a: int, b: int, t: int) -> bool:
@@ -124,10 +128,12 @@ def evaluate(labels: Dict[str, Any], stream: sd.Stream, truth: List[Optional[str
                 "spurious": e["kind"] == "spurious",
                 "high_harm": e["high_harm"]}[k]
 
+    version = cdoc.get("version", 1)
+    classes = dc.classes_of(version)
     cands = [(pos[c["first_word_i"]], pos[c["last_word_i"]], c) for c in cdoc["candidates"]]
     for e in errors:
         by = [c for a, b, c in cands if surfaces(a, b, e["t"])]
-        e["surfaced_by"] = sorted({c["class"] for c in by}, key=dc.CLASSES.index)
+        e["surfaced_by"] = sorted({c["class"] for c in by}, key=classes.index)
         e["candidates"] = [c["id"] for c in by]
 
     def recall(es: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -156,10 +162,13 @@ def evaluate(labels: Dict[str, Any], stream: sd.Stream, truth: List[Optional[str
             "windows_with_error_share": _ratio(with_err, len(mine)),
         }
 
-    per_class = {x: {"family": dc.FAMILY[x], **stats(lambda c, x=x: c == x)} for x in dc.CLASSES}
-    per_group = {"split (all five)": stats(lambda c: dc.FAMILY[c] == "split"),
-                 "merge (all four)": stats(lambda c: dc.FAMILY[c] == "merge"),
-                 "everything but shift": stats(lambda c: c != "shift")}
+    per_class = {x: {"family": dc.FAMILY[x], **stats(lambda c, x=x: c == x)} for x in classes}
+    per_group = {}
+    for fam in ("split", "merge", "pair"):
+        n_fam = sum(1 for x in classes if dc.FAMILY[x] == fam)
+        if n_fam:
+            per_group[f"{fam} ({_HOW_MANY[n_fam]})"] = stats(lambda c, fam=fam: dc.FAMILY[c] == fam)
+    per_group["everything but shift"] = stats(lambda c: c != "shift")
 
     # Sites, as the generator merged them.
     sites = [(pos[s["first_word_i"]], pos[s["last_word_i"]], s) for s in cdoc["sites"]]
@@ -196,9 +205,17 @@ def evaluate(labels: Dict[str, Any], stream: sd.Stream, truth: List[Optional[str
             "surfaced": bool(e["surfaced_by"]), "surfaced_by": e["surfaced_by"],
             "candidates": e["candidates"],
             "return_word_i": stream.index[r] if r < n else None,
-            "return_surfaced_by": sorted({c["class"] for c in back}, key=dc.CLASSES.index),
+            "return_surfaced_by": sorted({c["class"] for c in back}, key=classes.index),
             "run_inside_one_site": any(a < t and (r <= b if r < n else b == n - 1) for a, b, _ in sites),
         })
+
+    # Reported, not gated (v2 plan §4): the returns out of the high-harm runs.
+    has_return = [h for h in high if h["return_word_i"] is not None]
+    ret_hit = sum(1 for h in has_return if h["return_surfaced_by"])
+    both = sum(1 for h in has_return if h["surfaced"] and h["return_surfaced_by"])
+    returns = {"high_harm_with_a_return": len(has_return),
+               "return_surfaced": ret_hit, "return_recall": _ratio(ret_hit, len(has_return)),
+               "bracketed": both, "bracketed_share": _ratio(both, len(has_return))}
 
     # Missed changes no candidate surfaces, with the structural facts a reason needs.
     def nearest_window(t: int) -> Tuple[Optional[int], Optional[str]]:
@@ -244,7 +261,8 @@ def evaluate(labels: Dict[str, Any], stream: sd.Stream, truth: List[Optional[str
 
     return {
         "speaker_map": speaker_map,
-        "params_preregistered": cdoc.get("params") == dc.default_params(),
+        "generator_version": version, "plan": cdoc.get("plan"),
+        "params_preregistered": cdoc.get("params") == dc.default_params(version),
         "params_sha256": cdoc.get("params_sha256"),
         "surfacing_rule": "window [a, b] surfaces transition t iff a < t <= b",
         "errors": {"missed": sum(1 for e in errors if e["kind"] == "missed"),
@@ -255,6 +273,7 @@ def evaluate(labels: Dict[str, Any], stream: sd.Stream, truth: List[Optional[str
         "volume": volume,
         "bar": bar,
         "high_harm": high,
+        "high_harm_returns": returns,
         "unsurfaced_misses": unsurfaced,
         "errors_detail": [{k: v for k, v in e.items() if k != "t"} for e in errors],
     }
@@ -263,7 +282,8 @@ def evaluate(labels: Dict[str, Any], stream: sd.Stream, truth: List[Optional[str
 def summary(r: Dict[str, Any]) -> List[str]:
     pct = lambda x: "n/a" if x is None else f"{100 * x:.1f}%"   # noqa: E731
     rec, v, b = r["recall"], r["volume"], r["bar"]
-    out = [f"params pre-registered: {r['params_preregistered']}",
+    out = [f"generator v{r['generator_version']}, params {r['params_sha256']}, "
+           f"pre-registered: {r['params_preregistered']}",
            "recall: " + "; ".join(f"{k} {x['surfaced']}/{x['total']} ({pct(x['recall'])})" for k, x in rec.items()),
            f"volume: {v['candidates']} candidates ({v['candidates_per_hour']}/h), {v['sites']} sites "
            f"({v['sites_per_hour']}/h); words covered {v['words_covered']}/{v['words']} "
@@ -286,6 +306,10 @@ def summary(r: Dict[str, Any]) -> List[str]:
                    + (f"surfaced by {', '.join(h['surfaced_by'])}" if h["surfaced"] else "NOT surfaced")
                    + f"; return by {', '.join(h['return_surfaced_by']) or 'none'}"
                    + f"; one site holds the run: {h['run_inside_one_site']}")
+    hr = r["high_harm_returns"]
+    out.append(f"high-harm returns (reported, not gated): surfaced {hr['return_surfaced']}/"
+               f"{hr['high_harm_with_a_return']} ({pct(hr['return_recall'])}); start and return both "
+               f"{hr['bracketed']}/{hr['high_harm_with_a_return']}")
     for u in r["unsurfaced_misses"]:
         out.append(f"unsurfaced miss {u['word_i']} {u['time']} {u['from']}->{u['to']} "
                    f"({u['misattributed_words']} words, boundary {u['nearest_boundary_words']} away, "
@@ -303,19 +327,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("labels", help="the *_labels.json that diarization_labels.py --check wrote")
     p.add_argument("candidates", help="the *_speaker_candidates.json that diarization_candidates.py wrote")
     p.add_argument("--speaker-map", required=True,
-                   help="who each diarizer label is, e.g. SPEAKER_01=L,SPEAKER_00=S")
+                   help="who each diarizer label is, e.g. SPEAKER_01=L,SPEAKER_00=S; or 'auto', the "
+                        "map the labels imply (docs/diarization_candidates_v2_plan.md §6.6)")
     p.add_argument("--source", default=None, help="the raw JSON, if not where the labels say")
     p.add_argument("--json", default=None, help="also write the numbers here")
     a = p.parse_args(argv)
     path = Path(a.labels)
     try:
-        speaker_map = sd.parse_speaker_map(a.speaker_map)
+        if a.speaker_map.strip().lower() != "auto":
+            sd.parse_speaker_map(a.speaker_map)         # a malformed map fails before any work
         labels = json.loads(path.read_text())
         if not labels.get("complete"):
             raise SystemExit("the labels are not complete; recall needs a finished sheet")
         cdoc = json.loads(Path(a.candidates).read_text())
         check_match(labels, cdoc)
         stream = sd.rendered_stream(labels, path, Path(a.source) if a.source else None)
+        speaker_map, map_rule = sd.resolve_speaker_map(a.speaker_map, labels, stream)
         unmapped = sorted({lab for lab in stream.labels if lab is not None} - set(speaker_map))
         if unmapped:
             raise SystemExit(f"--speaker-map does not say who {', '.join(unmapped)} is")
@@ -333,7 +360,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     result = evaluate(labels, stream, sd.derive_truth(labels, stream, speaker_map), speaker_map, cdoc, render)
     result = {"labels": str(path), "labels_sha256": dl.sha256_file(path),
               "candidates": str(a.candidates), "candidates_sha256": dl.sha256_file(Path(a.candidates)),
-              "source": labels["source"], "source_sha256": labels["source_sha256"], **result}
+              "source": labels["source"], "source_sha256": labels["source_sha256"],
+              **result, "speaker_map_rule": map_rule}
+    if map_rule != "given":
+        print("speaker map (auto): " + ",".join(f"{k}={v}" for k, v in sorted(speaker_map.items())))
     for ln in summary(result):
         print(ln)
     if a.json:
