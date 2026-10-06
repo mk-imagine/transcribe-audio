@@ -7,6 +7,7 @@ analysis helpers are scratch, and live in the gitignored `scratch/` (its README 
 |---|---|
 | `transcribe.slurm` | one recording per job. Submitted through `src/run_transcription.sh`, which builds the flags |
 | `transcribe_parallel.slurm` | several recordings in one allocation, one process per file on its own GPU (1–2 per GPU). Its header has the measurements behind the per-GPU choice |
+| `bakeoff/<arm>.slurm` | the diarization bake-off (`docs/diarization_bakeoff_plan.md`): one job per arm (`community1`, `diarizen`, `sortformer`), each recording run twice through `bakeoff/run_arm.py`. `bakeoff/arm_job.sh` is their shared body. Their envs are built by `envs/cw2diar.sh` and `envs/bakeoff-*.sh` |
 
 Both write their logs to `scratch/logs/`.
 
