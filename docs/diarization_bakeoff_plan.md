@@ -124,6 +124,8 @@ Sources: <https://huggingface.co/nvidia/Nemotron-3-Diarization>,
 
 ### 1.4 Optional arms: Mark's call before running, not part of this bar
 
+**Decided 2026-10-05, before any job ran (§10 A1):** 1x is added as a challenger; 3b is not.
+
 Each would be an arm beyond the three approved. None is scored unless Mark adds it before the
 first job runs.
 
@@ -491,7 +493,7 @@ S=PSY777-F26-WK2-Mon
 python3 scripts/diarization_bakeoff.py score \
     transcripts/lectures/${S}_job49864_labels.normalized.json \
     --gold-map SPEAKER_01=L,SPEAKER_00=S \
-    transcripts/bakeoff/$S/{community1,diarizen,sortformer}/run{1,2}/provenance.json \
+    transcripts/bakeoff/$S/{community1,community1-exclusive,diarizen,sortformer}/run{1,2}/provenance.json \
     --out-dir transcripts/bakeoff/$S/scored --json transcripts/bakeoff/$S/bakeoff-score.json
 ```
 
@@ -503,3 +505,27 @@ the scoring, the bar and the runner's stdlib side. It needs no model and no GPU.
 ## 9. Results
 
 Not run.
+
+---
+
+## 10. Amendments (dated; each made before any job ran)
+
+**A1 (2026-10-05): Mark's decisions on §1.4.** No result existed when these were made: no
+environment had been built and no job submitted.
+
+- **Arm 1x is added:** community-1's `exclusive_speaker_diarization`, scored and held to the bar
+  in §5 exactly like the other two challengers. The community-1 job already writes it
+  (`community1-exclusive/`), so no job, environment or runner changes. The scorer already treats
+  every arm other than `community1` as a challenger. Only the score command in §8 changes, so that
+  it lists the arm's provenance.
+- **3b is not added.** Sortformer stays one arm, `nvidia/Nemotron-3-Diarization`, as
+  pre-registered in §1.3.
+- **The close-call rule (§5) now ranks three challengers by install cost:** **1x lowest**. Adopting
+  it changes one line of `diarize.py`, with no new environment, model or license. Then
+  **Nemotron-3**, then **DiariZen**, for the reasons in §5. The rule is otherwise unchanged:
+  the two passing arms with the fewest P1 words are compared, and within 5 words the cheaper
+  install decides.
+- **Multiplicity, stated in advance:** three challengers on one lecture make it likelier that
+  one passes by chance. The bar isn't tightened for this. PSY498 (§6.3) is the guard: any
+  switch candidate is a recommendation subject to its held-out re-score.
+
