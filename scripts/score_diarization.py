@@ -13,8 +13,9 @@ profile defaults), refusing a source whose sha256 differs or a render whose
 boundaries are not the ones that were labeled.
 
 The sheet records verdicts and markers, not a speaker per word, and it has no
-place to say which diarizer label is whom, so ``--speaker-map`` says it. The
-per-word truth is read off the sheet like this:
+place to say which diarizer label is whom, so ``--speaker-map`` says it, or,
+as ``--speaker-map auto``, derives it from the labels by a fixed rule
+(``derive_speaker_map``). The per-word truth is read off the sheet like this:
 
 * the first word's speaker is its rendered label's identity under the map;
 * a boundary marked ``real`` starts its ``who``, or, with no ``who``, the new
@@ -168,6 +169,80 @@ def derive_truth(labels: Dict[str, Any], stream: Stream,
             cur = m["who"]
         out.append(cur)
     return out
+
+
+STUDENTS = ("S",) + tuple(f"S{k}" for k in range(2, 10))
+MAP_RULE = "auto: docs/diarization_candidates_v2_plan.md §6.6 (as amended, A2)"
+
+
+def derive_speaker_map(labels: Dict[str, Any], stream: Stream) -> Tuple[Dict[str, str], Dict[str, Any]]:
+    """The speaker map the labels imply: ``--speaker-map auto``.
+
+    The rule is pre-registered in docs/diarization_candidates_v2_plan.md §6.6
+    (as amended, A2). It reads only the words whose speaker the labels *state*
+    -- the truth derived with an empty map, so a marker or a ``real``
+    boundary's ``who:`` sets it, and nothing the map would supply does:
+
+    * nL(X), nS(X): the stated instructor and student words under label X;
+      NL, NS: their totals;
+    * X is L iff nL(X)/NL >= nS(X)/NS, each share 0 when its total is 0, so a
+      label with no stated words, or a lecture with no stated student, is L;
+      otherwise X is the student with the most stated words under X (ties: S,
+      then S2 .. S9).
+
+    Not plurality: a student's label that spurious splits fill with the
+    lecturer's words would map to L. Not one to one: a lecturer split across
+    two labels is one person. Not the map's own output: ``derive_truth`` reads
+    the map at the first word and at every empty ``who:``, so a map checked
+    against the truth it produced can confirm a wrong guess. Raises SystemExit
+    where the labels leave a label's identity entirely to the map: no stated
+    word under it, and a ``real`` boundary with an empty ``who:`` into it.
+    """
+    rendered = sorted({lab for lab in stream.labels if lab is not None}, key=str)
+    if not rendered:
+        raise SystemExit("no rendered speaker labels to map")
+    stated = derive_truth(labels, stream, {})
+    tally: Dict[str, Dict[str, int]] = {x: {} for x in rendered}
+    for lab, who in zip(stream.labels, stated):
+        if lab is not None and who is not None and who != UNKNOWN_WHO:
+            tally[lab][who] = tally[lab].get(who, 0) + 1
+    n_l = {x: tally[x].get(INSTRUCTOR, 0) for x in rendered}
+    n_s = {x: sum(v for k, v in tally[x].items() if is_student(k)) for x in rendered}
+    tot_l, tot_s = sum(n_l.values()), sum(n_s.values())
+
+    def instructor(x: str) -> bool:
+        if tot_s == 0:
+            return True                     # the student share is 0
+        if tot_l == 0:
+            return n_s[x] == 0              # the instructor share is 0
+        return n_l[x] * tot_s >= n_s[x] * tot_l
+
+    out = {x: INSTRUCTOR if instructor(x) else
+           max(STUDENTS, key=lambda w, x=x: (tally[x].get(w, 0), -STUDENTS.index(w))) for x in rendered}
+    empty_who = [b for b in labels["boundaries"] if b["verdict"] == "real" and not b["who"]]
+    for b in empty_who:
+        if b["to"] in tally and not tally[b["to"]]:
+            raise SystemExit(f"{b['to']} has no word whose speaker the labels state, and {b['id']} "
+                             "(real) into it leaves who: empty; fill that who: (an operator answer, "
+                             "logged) or pass the map with --speaker-map")
+    return out, {
+        "rule": MAP_RULE,
+        "stated_words": sum(1 for w in stated if w is not None and w != UNKNOWN_WHO),
+        "unstated_words": sum(1 for w in stated if w is None),
+        "real_boundaries_without_who": [b["id"] for b in empty_who],
+        "instructor_words": tot_l, "student_words": tot_s,
+        "labels": {x: {"rendered_words": sum(1 for lab in stream.labels if lab == x),
+                       "stated_instructor_words": n_l[x], "stated_student_words": n_s[x],
+                       "stated_by_who": dict(sorted(tally[x].items())), "who": out[x]}
+                   for x in rendered}}
+
+
+def resolve_speaker_map(spec: str, labels: Dict[str, Any],
+                        stream: Stream) -> Tuple[Dict[str, str], Any]:
+    """``auto``, or an explicit LABEL=WHO list. Returns (map, how it was set)."""
+    if spec.strip().lower() == "auto":
+        return derive_speaker_map(labels, stream)
+    return parse_speaker_map(spec), "given"
 
 
 # ---------------------------------------------------------------- scoring ---
@@ -394,7 +469,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("labels", help="the *_labels.json that diarization_labels.py --check wrote")
     p.add_argument("--speaker-map", required=True,
-                   help="who each diarizer label is, e.g. SPEAKER_01=L,SPEAKER_00=S")
+                   help="who each diarizer label is, e.g. SPEAKER_01=L,SPEAKER_00=S; or 'auto', the "
+                        "map the labels imply (docs/diarization_candidates_v2_plan.md §6.6)")
     p.add_argument("--source", default=None, help="the raw JSON, if not where the labels say")
     p.add_argument("--near", type=int, default=NEAR_WORDS,
                    help="words either side for a 'displaced' boundary; precision within N words is "
@@ -404,12 +480,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     a = p.parse_args(argv)
     path = Path(a.labels)
     try:
-        speaker_map = parse_speaker_map(a.speaker_map)
+        if a.speaker_map.strip().lower() != "auto":
+            parse_speaker_map(a.speaker_map)            # a malformed map fails before any work
         labels = json.loads(path.read_text())
         if not labels.get("complete") and not a.allow_incomplete:
             raise SystemExit("the labels are not complete (an unlabeled boundary or an open change); "
                              "finish the sheet, or pass --allow-incomplete")
         stream = rendered_stream(labels, path, Path(a.source) if a.source else None)
+        speaker_map, map_rule = resolve_speaker_map(a.speaker_map, labels, stream)
         unmapped = sorted({lab for lab in stream.labels if lab is not None} - set(speaker_map))
         if unmapped:
             raise SystemExit(f"--speaker-map does not say who {', '.join(unmapped)} is")
@@ -421,7 +499,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
     result = score(labels, stream, derive_truth(labels, stream, speaker_map), speaker_map, a.near)
     result = {"labels": str(path), "labels_sha256": dl.sha256_file(path),
-              "source": labels["source"], "source_sha256": labels["source_sha256"], **result}
+              "source": labels["source"], "source_sha256": labels["source_sha256"],
+              **result, "speaker_map_rule": map_rule}
+    if map_rule != "given":
+        print("speaker map (auto): " + ",".join(f"{k}={v}" for k, v in sorted(speaker_map.items())))
     for ln in summary(result):
         print(ln)
     if a.json:

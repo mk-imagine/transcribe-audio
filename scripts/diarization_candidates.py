@@ -2,15 +2,19 @@
 """Diarization repair candidates: the places a model pass would judge.
 
     python3 scripts/diarization_candidates.py transcripts/lectures/X_raw.json
-        -> X_speaker_candidates.json beside the input
+        -> X_speaker_candidates.json beside the input (v1)
+    python3 scripts/diarization_candidates.py --version 2 transcripts/lectures/X_raw.json
+        -> X_speaker_candidates_v2.json beside the input
 
-Build step 4 of docs/diarization_repair_plan.md (§1.5). The classes, their
-parameters, the metrics and the bar were pre-registered, before this file was
-written, in docs/diarization_candidates_plan.md; that file is the spec, and
-every rule below cites it. In short: the render the lecture profile shows
-(``assign`` plus ``smooth`` at their defaults) is regenerated from the raw
-JSON, and each class proposes a *window* -- a span of words, not a point --
-where a speaker error may lie:
+Build step 4 of docs/diarization_repair_plan.md (§1.5). Two versions, each
+pre-registered before it was written: v1 in docs/diarization_candidates_plan.md,
+v2 in docs/diarization_candidates_v2_plan.md. Those files are the spec, and
+every rule below cites one. **v1 is frozen**: its output is byte-identical to
+the one PR #29 measured, and it stays the default until v2 passes its held-out
+test. In short: the render the lecture profile shows (``assign`` plus
+``smooth`` at their defaults) is regenerated from the raw JSON, and each class
+proposes a *window* -- a span of words, not a point -- where a speaker error
+may lie:
 
 * ``shift``: every rendered boundary, with the N words either side where the
   true change may be;
@@ -19,7 +23,12 @@ where a speaker error may lie:
 * ``dropped_raw_change``: words a raw diarizer turn labeled X that the render
   labels otherwise, with no rendered X boundary close enough to contain it;
 * merge candidates (did someone else speak inside this run?):
-  ``question_answer``, ``backchannel``, ``address_reply``, ``register_change``.
+  ``question_answer``, ``backchannel``, ``address_reply``, and in v1 only
+  ``register_change``;
+* v2 only: ``clause_backchannel`` (the backchannel cue inside a sentence), and
+  the pair classes ``paired_return`` and ``paired_start``: the transition
+  after a question end, searched forward from a start inside a run, or back
+  from an evaluation cue.
 
 Overlapping windows are merged into *sites*, one model judgment each in step 5.
 
@@ -54,20 +63,47 @@ from render import segment, speakers  # noqa: E402
 from render.formats import fmt_time  # noqa: E402
 
 FORMAT = 1
-PLAN = "docs/diarization_candidates_plan.md"
+PLAN = "docs/diarization_candidates_plan.md"            # v1's spec
+PLANS = {1: PLAN, 2: "docs/diarization_candidates_v2_plan.md"}
+VERSIONS = (1, 2)
+DEFAULT_VERSION = 1     # v1 stays the default until v2 passes its held-out test (v2 plan §6.3)
 
-# In output order at one window: the class list of the plan's §2.
+# In output order at one window: the class list of v1's plan §2.
 CLASSES = ("shift", "long_island", "edge_island", "no_punct_lowercase", "zero_gap",
            "inside_sentence", "dropped_raw_change", "question_answer", "backchannel",
            "address_reply", "register_change")
+# v2's (v2 plan §2): register_change dropped (R1), three classes added (R3, R5, R6).
+CLASSES_V2 = ("shift", "long_island", "edge_island", "no_punct_lowercase", "zero_gap",
+              "inside_sentence", "dropped_raw_change", "question_answer", "backchannel",
+              "clause_backchannel", "address_reply", "paired_return", "paired_start")
+CLASSES_BY_VERSION = {1: CLASSES, 2: CLASSES_V2}
 FAMILY = {"shift": "shift", "long_island": "split", "edge_island": "split",
           "no_punct_lowercase": "split", "zero_gap": "split", "inside_sentence": "split",
           "dropped_raw_change": "raw", "question_answer": "merge", "backchannel": "merge",
-          "address_reply": "merge", "register_change": "merge"}
+          "address_reply": "merge", "register_change": "merge",
+          "clause_backchannel": "merge", "paired_return": "pair", "paired_start": "pair"}
 
 
-def default_params() -> Dict[str, Any]:
-    """The pre-registered parameters (plan §3). Changing one is a post-hoc change."""
+def version_of(params: Dict[str, Any]) -> int:
+    """v1's parameters carry no version (its output keeps PR #29's bytes)."""
+    return int(params.get("version", 1))
+
+
+def classes_of(version: int) -> Tuple[str, ...]:
+    if version not in CLASSES_BY_VERSION:
+        raise ValueError(f"unknown candidate generator version {version!r}")
+    return CLASSES_BY_VERSION[version]
+
+
+def default_params(version: int = 1) -> Dict[str, Any]:
+    """A version's pre-registered parameters. Changing one is a post-hoc change.
+
+    v1: its plan §3. v2: its plan §3, which v2's own ``params_sha256`` pins.
+    """
+    if version == 2:
+        return _v2_params()
+    if version != 1:
+        raise ValueError(f"unknown candidate generator version {version!r}")
     return {
         "near_words": 3,
         "zero_gap_s": 0.005,
@@ -88,6 +124,28 @@ def default_params() -> Dict[str, Any]:
         "solicit": sorted("anyone anybody someone somebody question questions".split()),
         "solicit_bigrams": [["go", "ahead"]],
         "first_person": sorted("i i'm i've i'd i'll me my mine myself".split()),
+    }
+
+
+def _v2_params() -> Dict[str, Any]:
+    """v2 plan §3: v1's values for the classes it keeps, plus the revisions'."""
+    v1 = default_params(1)
+    kept = ("near_words", "zero_gap_s", "island_max_words", "backchannel_max_words",
+            "address_max_words", "answer_openers", "backchannel", "second_person", "solicit",
+            "solicit_bigrams")
+    return {
+        "version": 2,
+        "classes": list(CLASSES_V2),
+        **{k: v1[k] for k in kept},
+        "question_answer_openers": sorted(v1["answer_openers"] + ["so"]),       # R4
+        "clause_punct": sorted([",", ";", ":", "\u2013", "\u2014"]),           # R3: en, em dash
+        "clause_pause_s": 0.3,                                                   # R3
+        "fillers": ["uh", "um"],                                                 # R3
+        "pair_max_words": 60,                                                    # R5, R6
+        "pair_return_from": [c for c in CLASSES_V2 if c in (
+            "dropped_raw_change", "question_answer", "backchannel", "clause_backchannel",
+            "address_reply")],                                                   # R5
+        "pair_start_from": ["backchannel", "clause_backchannel"],                # R6
     }
 
 
@@ -320,9 +378,17 @@ def dropped_raw(r: Render, out: Out, P: Dict[str, Any]) -> None:
 
 
 def merge_cues(r: Render, out: Out, P: Dict[str, Any]) -> None:
-    """Textual turn-taking cues inside one label stretch (plan §2, merge)."""
+    """Textual turn-taking cues inside one label stretch (plan §2, merge).
+
+    v2 changes two things here and nothing else: ``question_answer`` reads its
+    own opener list (v2 plan R4), and ``register_change`` is gone (R1). v1's
+    parameters carry neither key, so v1 runs exactly as registered.
+    """
+    enabled = set(P.get("classes", CLASSES))
     openers, back = set(P["answer_openers"]), set(P["backchannel"])
-    second, solicit, fps = set(P["second_person"]), set(P["solicit"]), set(P["first_person"])
+    qa_openers = set(P.get("question_answer_openers", P["answer_openers"]))
+    second, solicit = set(P["second_person"]), set(P["solicit"])
+    fps = set(P.get("first_person", ()))
     bigrams = {tuple(b) for b in P["solicit_bigrams"]}
     sents, toks = r.sentences, [token(w.text) for w in r.words]
     for j, (f, l) in enumerate(sents):
@@ -334,7 +400,7 @@ def merge_cues(r: Render, out: Out, P: Dict[str, Any]) -> None:
         if same_next:
             rr = sents[j + 1][0]
             op = toks[rr]
-            if ends_question(r.words[l]) and op in openers:
+            if ends_question(r.words[l]) and op in qa_openers:
                 out.add("question_answer", f - 1, rr, rr, {"opener": op, "question_words": nw})
             if nw <= P["address_max_words"] and segment.is_terminal(r.words[l]) and op in openers:
                 cue = next((t for t in st if t in second or t in solicit), None)
@@ -347,7 +413,7 @@ def merge_cues(r: Render, out: Out, P: Dict[str, Any]) -> None:
         if same_prev and same_next and 1 <= nw <= P["backchannel_max_words"] and all(t in back for t in st):
             out.add("backchannel", f - 1, l + 1, f, {"tokens": st, "words": nw})
 
-        if same_prev:
+        if same_prev and "register_change" in enabled:
             ss, se, _ = r.stretches[r.stretch[f]]
             w_ = P["register_window_words"]
             before = toks[max(ss, f - w_):f]
@@ -359,6 +425,104 @@ def merge_cues(r: Render, out: Out, P: Dict[str, Any]) -> None:
                     out.add("register_change", f - 1, f, f, {
                         "first_person_before": fb, "first_person_after": fa,
                         "before_words": len(before), "after_words": len(after)})
+
+
+# ------------------------------------------------------- v2: clause cues -----
+
+def clause_split(r: Render, p: int, P: Dict[str, Any]) -> Optional[str]:
+    """Why a clause starts at word p, p not its sentence's first word (v2 plan §2):
+    ``punct`` (word p-1 ends in clause punctuation, closers stripped), ``pause``
+    (a gap over ``clause_pause_s``), or None."""
+    if r.words[p - 1].text.rstrip(segment._CLOSERS).endswith(tuple(P["clause_punct"])):
+        return "punct"
+    g = r.gap(p)
+    if g is not None and g > P["clause_pause_s"]:
+        return "pause"
+    return None
+
+
+def clauses(r: Render, P: Dict[str, Any]) -> List[Tuple[int, int]]:
+    """(first, last) of every clause. Clauses partition each sentence, so every
+    sentence boundary is a clause boundary."""
+    out: List[Tuple[int, int]] = []
+    for f, l in r.sentences:
+        s = f
+        for p in range(f + 1, l + 1):
+            if clause_split(r, p, P):
+                out.append((s, p - 1))
+                s = p
+        out.append((s, l))
+    return out
+
+
+def clause_backchannel(r: Render, out: Out, P: Dict[str, Any]) -> None:
+    """A short clause of backchannel tokens inside a sentence, mid-run (v2 plan R3).
+
+    The whole-sentence case is v1's ``backchannel``, so this one fires only
+    where that one cannot. Fillers are left out: between commas or pauses they
+    are a hesitation inside one speaker's sentence.
+    """
+    back, fill = set(P["backchannel"]), set(P["fillers"])
+    toks = [token(w.text) for w in r.words]
+    whole = set(r.sentences)
+    starts = {f for f, _ in r.sentences}
+
+    def split(p: int) -> Optional[str]:
+        return "sentence" if p in starts else clause_split(r, p, P)
+
+    for f, l in clauses(r, P):
+        nw = l - f + 1
+        if (f, l) in whole or not 1 <= nw <= P["backchannel_max_words"]:
+            continue
+        st = toks[f:l + 1]
+        if not all(t in back and t not in fill for t in st):
+            continue
+        if f == 0 or l == r.n - 1 or r.stretch[f - 1] != r.stretch[f] or r.stretch[l + 1] != r.stretch[l]:
+            continue                    # a clause before and after it, in its label stretch
+        out.add("clause_backchannel", f - 1, l + 1, f, {
+            "tokens": st, "words": nw, "split_before": split(f), "split_after": split(l + 1),
+            "gap_before_s": _round(r.gap(f)), "gap_after_s": _round(r.gap(l + 1))})
+
+
+# --------------------------------------------------------------- v2: pairs ---
+
+def pairs(r: Render, out: Out, P: Dict[str, Any]) -> None:
+    """paired_return and paired_start (v2 plan R5, R6, §2).
+
+    Both propose the transition after a question end, window [q, q+1]:
+    ``paired_return`` searches forward from the end of every window that
+    proposes a change inside a run (the earlier speaker resumes after a
+    student's question); ``paired_start`` searches back from the start of every
+    evaluation cue (the answer it evaluates began after the instructor's
+    question). Neither crosses a rendered boundary or reaches past
+    ``pair_max_words``. Pairs come from the other classes' windows, never from
+    other pairs, and sources that find one question end share one candidate.
+    """
+    cap = P["pair_max_words"]
+    ret_from, start_from = set(P["pair_return_from"]), set(P["pair_start_from"])
+    found: Dict[Tuple[str, int], List[Dict[str, Any]]] = {}
+    for c in list(out.items):
+        a, b = c["a"], c["b"]
+        src = {"class": c["class"], "at_word_i": r.words[c["at"]].i}
+        if c["class"] in ret_from:
+            for q in range(b, min(b + cap - 1, r.n - 2) + 1):
+                if r.stretch[q + 1] != r.stretch[b]:
+                    break
+                if ends_question(r.words[q]):
+                    found.setdefault(("paired_return", q), []).append(dict(src, words=q - b))
+                    break
+        if c["class"] in start_from:
+            for q in range(a, max(0, a - cap + 1) - 1, -1):
+                if r.stretch[q] != r.stretch[a]:
+                    break
+                if ends_question(r.words[q]):
+                    found.setdefault(("paired_start", q), []).append(dict(src, words=a - q))
+                    break
+    order = CLASSES_V2.index
+    for (cls, q), srcs in sorted(found.items(), key=lambda kv: (kv[0][1], order(kv[0][0]))):
+        srcs = sorted(srcs, key=lambda s: (s["at_word_i"], order(s["class"]), s["words"]))
+        out.add(cls, q, q + 1, q + 1, {
+            "question_end_word_i": r.words[q].i, "gap_s": _round(r.gap(q + 1)), "sources": srcs})
 
 
 # --------------------------------------------------------------- assemble ---
@@ -376,9 +540,15 @@ def sites_of(cands: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 
 def generate(doc: Dict[str, Any], profile: str = "lecture",
-             params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Candidates and sites for a record. Deterministic: no clock, no randomness."""
-    P = params or default_params()
+             params: Optional[Dict[str, Any]] = None, version: int = DEFAULT_VERSION) -> Dict[str, Any]:
+    """Candidates and sites for a record. Deterministic: no clock, no randomness.
+
+    ``params`` default to ``version``'s registered ones; given, they carry
+    their own version. v1's output is byte-for-byte what PR #29 measured.
+    """
+    P = params or default_params(version)
+    version = version_of(P)
+    classes = classes_of(version)
     r = render(doc, profile)
     out = Out(r)
     shift(r, out, P)
@@ -386,6 +556,9 @@ def generate(doc: Dict[str, Any], profile: str = "lecture",
     boundary_cues(r, out, P)
     dropped_raw(r, out, P)
     merge_cues(r, out, P)
+    if version >= 2:
+        clause_backchannel(r, out, P)
+        pairs(r, out, P)            # last: its sources are every other class's windows
 
     src = doc.get("source") or {}
     offset = float((src.get("excerpt") or {}).get("offset_s") or 0.0)
@@ -393,7 +566,7 @@ def generate(doc: Dict[str, Any], profile: str = "lecture",
     hours = dur / 3600 if dur else None
     w = r.words
 
-    items = sorted(out.items, key=lambda c: (c["a"], c["b"], CLASSES.index(c["class"]), c["at"]))
+    items = sorted(out.items, key=lambda c: (c["a"], c["b"], classes.index(c["class"]), c["at"]))
     cands = []
     for k, c in enumerate(items, 1):
         c["id"] = f"C-{k:04d}"
@@ -408,13 +581,17 @@ def generate(doc: Dict[str, Any], profile: str = "lecture",
             "id": f"J-{k:03d}", "first_word_i": w[s["a"]].i, "last_word_i": w[s["b"]].i,
             "words": s["b"] - s["a"] + 1, "time": fmt_time(w[s["a"]].start or 0.0, offset),
             "candidates": [c["id"] for c in sorted(s["members"], key=lambda c: c["id"])],
-            "classes": [x for x in CLASSES if any(c["class"] == x for c in s["members"])]})
+            "classes": [x for x in classes if any(c["class"] == x for c in s["members"])]})
 
     covered = sum(s["words"] for s in sites)
     per_hour = (lambda x: round(x / hours, 1) if hours else None)   # noqa: E731
-    by_class = {x: sum(1 for c in cands if c["class"] == x) for x in CLASSES}
+    by_class = {x: sum(1 for c in cands if c["class"] == x) for x in classes}
+    # v1 keeps PR #29's exact keys (no version field); v2 says which it is.
+    head: Dict[str, Any] = {"format": FORMAT}
+    if version >= 2:
+        head["version"] = version
     return {
-        "format": FORMAT, "generator": "scripts/diarization_candidates.py", "plan": PLAN,
+        **head, "generator": "scripts/diarization_candidates.py", "plan": PLANS[version],
         "audio_duration_s": dur, "stream": r.mode, "stream_warning": r.warning, "offset_s": offset,
         "render": {"profile": profile, "pause_threshold_s": r.pause, "smoothing": True,
                    "max_island": r.max_island, "speaker_map": None, "words_reassigned": r.flipped},
@@ -437,9 +614,10 @@ def generate(doc: Dict[str, Any], profile: str = "lecture",
 
 def summary(res: Dict[str, Any]) -> List[str]:
     c = res["counts"]
-    out = [f"stream: {res['stream']}, {c['stream_words']} words, {c['boundaries']} rendered boundaries",
+    out = [f"generator v{res.get('version', 1)}, params {res['params_sha256'][:12]}",
+           f"stream: {res['stream']}, {c['stream_words']} words, {c['boundaries']} rendered boundaries",
            f"candidates: {c['candidates']} ({c['candidates_per_hour']} per audio hour)"]
-    for x in CLASSES:
+    for x in classes_of(res.get("version", 1)):
         out.append(f"  {x:<20} {c['by_class'][x]}")
     out.append(f"sites: {c['sites']} ({c['sites_per_hour']} per audio hour); words covered "
                f"{c['words_covered']} ({100 * (c['words_covered_share'] or 0):.1f}%)")
@@ -457,9 +635,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("input", help="a *_raw.json")
     p.add_argument("-o", "--output", default=None,
-                   help="default: <stem>_speaker_candidates.json beside the input")
+                   help="default: <stem>_speaker_candidates.json (v1) or "
+                        "<stem>_speaker_candidates_v2.json (v2) beside the input")
     p.add_argument("--profile", default="lecture", choices=sorted(PROFILES),
                    help="the render profile whose stream is judged (default lecture)")
+    p.add_argument("--version", type=int, default=DEFAULT_VERSION, choices=VERSIONS,
+                   help=f"the pre-registered generator to run (default {DEFAULT_VERSION}): "
+                        + "; ".join(f"v{v} {PLANS[v]}" for v in VERSIONS))
     a = p.parse_args(argv)
     inp = Path(a.input)
     try:
@@ -467,8 +649,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     except (OSError, ValueError) as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
-    out = Path(a.output) if a.output else inp.parent / f"{stem_of(inp)}_speaker_candidates.json"
-    res = generate(doc, a.profile)
+    suffix = "" if a.version == 1 else f"_v{a.version}"
+    out = Path(a.output) if a.output else inp.parent / f"{stem_of(inp)}_speaker_candidates{suffix}.json"
+    res = generate(doc, a.profile, version=a.version)
     label = os.path.relpath(inp.resolve(), out.parent.resolve())
     res = {"source": label, "source_sha256": sha256_file(inp), **res}
     out.parent.mkdir(parents=True, exist_ok=True)

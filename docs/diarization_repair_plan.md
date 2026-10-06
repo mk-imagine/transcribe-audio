@@ -1,6 +1,6 @@
 # Diarization repair: plan and manual to-dos
 
-**Status:** plan. Build steps 1–4 are done: the labeling sheet, Mark's labels, the baseline score (§1.7), and the candidate generator's recall (§1.8). **Step 4 fails its pre-registered bar** on one of five high-harm misses, so step 5 waits on a decision (§1.8). Nothing else is built. Decided 2026-09-30: speaker-attribution repair lives **here**,
+**Status:** plan. Build steps 1–4 are done: the labeling sheet, Mark's labels, the baseline score (§1.7), and the candidate generator's recall (§1.8). **Step 4's generator (v1) fails its pre-registered bar** on one of five high-harm misses. Mark chose a held-out test over accepting it. A revised generator (v2) is pre-registered and built (§1.9). It passes on PSY777, but that lecture is its design set. **Step 5 waits on the held-out score.** That needs Mark's labels for PSY498-F26-WK3-Tue (Part 2, item 2). Nothing else is built. Decided 2026-09-30: speaker-attribution repair lives **here**,
 upstream, not in any downstream consumer (D24 in `pipeline_plan.md`).
 **Part 1** is the design. **Part 2** is the manual work only Mark can do, including the
 labeling this plan needs before anything can be measured.
@@ -85,7 +85,7 @@ full:
 - compare exact spans, not substrings;
 - record which model, revision and prompt produced a sidecar, in the sidecar itself.
 
-**Which model, run where, is an open decision** (Part 2, item 4). Stage 1.5 runs anywhere, so it
+**Which model, run where, is an open decision** (Part 2, item 7). Stage 1.5 runs anywhere, so it
 does not need the cluster.
 
 ### 1.4 Evaluation: before anything is adopted
@@ -128,7 +128,12 @@ most of the way, the model pass isn't built.
    `scripts/diarization_candidates.py`, pre-registered in `docs/diarization_candidates_plan.md`
    and scored by `scripts/score_candidates.py`. Results are in §1.8. The bar fails: 4 of 5
    high-harm misses are surfaced.
-5. Model pass on candidates; score against the gate and the baseline.
+
+   **4b. v2, and a held-out test.** Pre-registered and built (2026-10-05), and design-set
+   score in: `docs/diarization_candidates_v2_plan.md`, run as `--version 2`; results in §1.9.
+   **Pending:** Mark's labels for PSY498-F26-WK3-Tue (Part 2, item 2). Then v1 and v2 are
+   both scored on that lecture, and v2 goes to step 5 only if it passes there.
+5. Model pass on candidates; score against the gate and the baseline. Waits on 4b.
 6. Only if 5 passes: the sidecar writer, render-time application, stamp fields, `check_render.py`
    cases, and a real re-render of the labeled lecture.
 
@@ -458,6 +463,133 @@ its range, so no N or window size within reason would have surfaced it.
 - **"Surfaced" is a necessary condition for a repair, not a sufficient one.** Step 5 still has
   to judge each site correctly, and the gate (zero false merges introduced) applies there.
 
+### 1.9 Step 4 follow-up: generator v2 (design set scored, held-out pending)
+
+**Pre-registered** 2026-10-05 in `docs/diarization_candidates_v2_plan.md`, before v2 was
+written or run, and before PSY498-F26-WK3-Tue has labels. That file holds:
+- the revisions, and why each was kept or dropped;
+- the parameters and their hash;
+- v1's metrics and bar, unrelaxed;
+- the held-out protocol.
+
+Order of commits on the branch:
+1. the pre-registration;
+2. two amendments, both made while building and before any v2 score. A1 corrects a parameter
+   hash that had been computed before one parameter was added. A2 replaces a speaker-map rule
+   that could confirm a wrong guess;
+3. the generator, scorer and checks;
+4. this section.
+
+**v1 is frozen, byte for byte.** `--version 1` is the default. Regenerated on PSY777, it is
+identical by `cmp` to PR #29's file (sha256 `571cab8d…`). The checks pin its parameter hash
+(`fd44dbfe…`) and its whole output on two synthetic records. Rescored with the updated scorer,
+every number §1.8 reports is unchanged.
+
+**What v2 changes.** Each change is post-hoc relative to PSY777, so every v2 number below is a
+**design-set number**:
+- `register_change` is dropped (87 candidates, 0 hits);
+- `clause_backchannel` is new: the backchannel cue inside a sentence (miss 2954);
+- `question_answer` takes `so` as an opener (return 4597);
+- `paired_return` and `paired_start` are new. Each proposes the transition after a question
+  end: forward from a start inside a run, or back from an evaluation cue.
+
+v2 is frozen at commit `a5b7900`, parameter hash `0c77f39d…`.
+
+```bash
+python3 scripts/diarization_candidates.py --version 2 transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json
+python3 scripts/score_candidates.py \
+    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.normalized.json \
+    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_speaker_candidates_v2.json \
+    --speaker-map SPEAKER_01=L,SPEAKER_00=S
+```
+
+**Against the bar, on the design set.** Passing here proves little: v2 was built to close these
+two gaps. A failure would have been informative.
+
+| Bar (unchanged) | v1 | v2 |
+|---|---|---|
+| High-harm recall = 100% | 4/5, fails | **5/5, passes** |
+| ≤ 180 sites per audio hour | 110.2 | 77.5 |
+| ≤ 25% of words inside a window | 9.3% | 8.9% |
+
+The pre-registered prediction was 5/5, about 78 sites/h and about 9%. It was met.
+
+**Recall and volume.**
+
+| Measure | v1 | v2 |
+|---|---|---|
+| All errors | 76/78 | 78/78 |
+| Missed changes | 14/16 | 16/16 |
+| … that misattribute words | 9/10 | 10/10 |
+| Spurious boundaries | 62/62 | 62/62 |
+| High-harm misses | 4/5 | **5/5** |
+| High-harm returns surfaced (reported, not gated) | 4/5 | 5/5 |
+| High-harm runs with start and return both surfaced | 3/5 | 5/5 |
+| Candidates | 384 (246.1/h) | 329 (210.8/h) |
+| Sites | 172 (110.2/h) | 121 (77.5/h) |
+| Words covered | 1,323 (9.3%) | 1,270 (8.9%) |
+| Sites that hold an error | 35/172 | 37/121 |
+| Sites with no boundary: count, words, holding an error | 136, 795, 2 | 85, 742, 4 |
+
+**The new and changed classes.** The other classes' windows are unchanged from §1.8.
+
+| Class | Cand. | /h | Words | Holds an error | Missed surfaced | High-harm | Alone (missed / high-harm) |
+|---|---|---|---|---|---|---|---|
+| `question_answer` (with `so`) | 17 | 10.9 | 136 | 1/17 | 1: 4597 | 0 | 0 / 0 |
+| `clause_backchannel` | 7 | 4.5 | 19 | 2/7 | 2: 2954, 4521 | 1: 2954 | **1 / 1** |
+| `paired_return` | 7 | 4.5 | 14 | 1/7 | 1: 4597 | 0 | 0 / 0 |
+| `paired_start` | 5 | 3.2 | 10 | 1/5 | 1: 4597 | 0 | 0 / 0 |
+
+**What it says.**
+- **`clause_backchannel` is the change the gate needed.** Miss 2954 is surfaced by it alone.
+- **The 44-word exchange's return (4597) is now surfaced three ways:**
+  - `question_answer`, through `so`;
+  - `paired_return`, from three sources (the exchange's raw-turn and backchannel start, and the
+    student's backchannel before the question);
+  - `paired_start`.
+
+  So both ends of every high-harm run are surfaced, though no single site holds the run of 2954
+  or 4553.
+- **`paired_start`'s hit is incidental to its rationale.** Its source is a backchannel clause
+  47 words into the instructor's answer, not an evaluation of a student's answer. This is the
+  one revision with no PSY777 miss behind it, and the design set says nothing about it.
+- **Volume falls by 30%.** Dropping `register_change` alone saves 43.6 sites/h, and the new and
+  changed classes add back 10.9. Each one's marginal cost is in the plan's §1.
+
+**Volume on eight unlabeled lectures** (no labels needed; the built generator):
+
+| Lecture | v1 sites/h | v1 words | v2 sites/h | v2 words |
+|---|---|---|---|---|
+| PSY777-F26-WK1-Wed | 109.4 | 7.9% | 69.1 | 7.1% |
+| PSY777-F26-WK2-Wed | 158.0 | 14.4% | 104.6 | 13.4% |
+| PSY777-F26-WK3-Wed | 161.6 | 12.2% | 109.5 | 11.3% |
+| PSY777-F26-WK4-Mon | 109.5 | 7.3% | 74.6 | 6.8% |
+| PSY777-F26-WK4-Wed | 166.5 | 12.6% | 104.5 | 11.6% |
+| PSY777-F26-WK5-Mon | 151.1 | 13.1% | 104.6 | 12.3% |
+| PSY582-S26-WK9-Thu | 121.0 | 10.6% | 117.1 | 10.7% |
+| PSY582-S26-WK12-Thu | 80.8 | 7.9% | 63.8 | 7.3% |
+
+v2 stays under both caps on all eight, with room to spare. v1 comes within 14 sites/h of the
+cap on one.
+
+**Held-out score: pending Mark's labels** (Part 2, item 2). The protocol is the v2 plan's §6:
+- v1 and v2 are both scored on PSY498-F26-WK3-Tue, with the parameter hashes above.
+- **v2 goes to step 5 only if it passes the unchanged bar there.**
+- The gate needs at least 3 high-harm misses.
+  - Below that, an unsurfaced miss still fails it.
+  - An all-surfaced result below 3 is reported as "not a test", and a further lecture is
+    labeled and pooled.
+- If v2 fails, nothing is tuned on PSY498. Mark chooses between a v3 with a further held-out
+  lecture and §1.8's stopgap.
+- The speaker map is `--speaker-map auto`: the share rule, applied to the words the labels
+  state. On PSY777 it reproduces SPEAKER_01=L, SPEAKER_00=S.
+- **No candidate file for PSY498 is generated until his labels check complete.**
+
+**Caveats.**
+- These are design-set numbers, and optimistic.
+- The held-out test is one lecture from another course, possibly with another lecturer.
+- Its high-harm count is likely to be small.
+
 ---
 
 ## Part 2 — Manual to-dos (Mark)
@@ -526,26 +658,57 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
      copy (`<stem>_labels.normalized.md`) checks clean, and the original is untouched. The
      conversion and the baseline it fed are in §1.7. Mark answered the open questions in
      `<stem>_labels.questions.md` the same day, and the §1.7 numbers are final under his answers.
+2. **Label PSY498-F26-WK3-Tue, the held-out lecture** (§1.9; protocol in
+   `docs/diarization_candidates_v2_plan.md` §6). Step 5 waits on this.
+   - **The sheet is already generated:** `transcripts/lectures/PSY498-F26-WK3-Tue_job49865_labels.md`,
+     with 52 boundary blocks. The raw turns change label 181 times.
+   - **The grammar and procedure are item 1's,** Parts A and B in one read-through. Check as
+     you go:
+
+     ```bash
+     python3 scripts/diarization_labels.py --check transcripts/lectures/PSY498-F26-WK3-Tue_job49865_labels.md
+     ```
+
+   - **Fill `who:` on every `real` boundary.** The scorer's speaker map is computed from the
+     identities the labels state (v2 plan §6.6). An empty `who:` into a label the labels never
+     otherwise identify makes it refuse, and costs a round of questions.
+   - **If someone other than the lecturer speaks first,** put a `>> change: WHO` above the first
+     line, with its `>> back:` where the lecturer starts.
+   - **Blinding.** No candidate file for this lecture is generated or shown until the labels
+     check complete. The candidates' windows must not steer where you look.
+   - The labels stay in `transcripts/` (gitignored), as item 1's do.
 
 ### For the study-notes benchmark (`~/.config/skillshare`)
 
-2. **Verify the S3 lecture note before it is used as a clean base.**
+3. **Verify the S3 lecture note before it is used as a clean base.**
    `~/Repos/personal/study-vault/Courses/PSY777/Lectures/PSY777-2026-08-31.md` was written by a Claude session. The
    planned seeded-fault benchmark for `study-notes-faultfinder` needs a note known to be free of
    faults; otherwise a faultfinder that correctly finds a real error scores as a false alarm.
    Mechanical provenance checks come first; Mark adjudicates what they can't settle.
-3. **Correct the study-notes plan's "hand-written" claims** (`drafts/study-notes-agents-plan.md`
+4. **Correct the study-notes plan's "hand-written" claims** (`drafts/study-notes-agents-plan.md`
    §5.3 pedagogy line, §7 vault paragraph, the S3 row), or ask Claude to. The note is Claude-written, and the plan's
    "calibration target" needs a human reference.
-4. **Later, small:** a blind judgment of style and register on a handful of generated notes. This
+5. **Later, small:** a blind judgment of style and register on a handful of generated notes. This
    is the one quality measure the benchmark can't make mechanical.
-5. **Still pending from the study-notes plan:** the S3 Obsidian render check. Install Obsidian, open
+6. **Still pending from the study-notes plan:** the S3 Obsidian render check. Install Obsidian, open
    `~/Repos/personal/study-vault`, and check callouts, embeds, aliased wikilinks, Mermaid and the
    graph on desktop and mobile.
 
 ### Decisions
 
-6. **Which model runs the repair pass, and where** (§1.3). Stage 1.5 can run locally or on the
+7. **Which model runs the repair pass, and where** (§1.3). Stage 1.5 can run locally or on the
    cluster. The choice affects cost, privacy (interview transcripts are human-subjects data;
    pipeline_plan §10, *IRB / data governance*) and reproducibility (the sidecar records the model
    and prompt either way).
+8. **The recording setup.** It decides what the diarizer has to work with in every lecture
+   after this one.
+   - **The setup today:** a Tascam DR-40X with its internal X/Y microphones, near the front of
+     the class. The lecturer is not individually mic'd. Every WAV in `data/` is mono,
+     48 kHz/16-bit.
+   - **The questions:**
+     1. Is the recorder set to mono, or are the SD card's originals stereo and downmixed later?
+        If they are stereo, keep the originals. The X/Y pair's two channels carry direction,
+        which could separate the lecturer from the students.
+     2. Which way does the recorder face?
+     3. Optional, if the lecturer agrees: a lavalier on one of the recorder's XLR inputs. That
+        gives a channel that is almost only the lecturer.
