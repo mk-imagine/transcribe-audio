@@ -453,6 +453,11 @@ Mark labeled what `diarization_labels.py` showed him: community-1's turns after 
 
 ## 7. A conditional direction arm (only if stereo originals exist)
 
+**Answered 2026-10-06: the recorder is set to mono.** No stereo originals exist for any
+recording so far, so this arm does not run. The text below stays as the design, if Mark
+switches the recorder to stereo for future lectures. Stage 1's handling of a stereo file is
+unverified (CrisperWhisper loads the file itself), so a switch needs its own small spike first.
+
 Mark hasn't said whether the recorder's **stereo** originals survive. Every WAV in `data/` is
 mono 48 kHz/16-bit. If they do, a direction signal exists that no arm above uses. Outside the
 bar, and briefly:
@@ -492,8 +497,8 @@ done
 S=PSY777-F26-WK2-Mon
 python3 scripts/diarization_bakeoff.py score \
     transcripts/lectures/${S}_job49864_labels.normalized.json \
-    --gold-map SPEAKER_01=L,SPEAKER_00=S \
     transcripts/bakeoff/$S/{community1,community1-exclusive,diarizen,sortformer}/run{1,2}/provenance.json \
+    --gold-map SPEAKER_01=L,SPEAKER_00=S \
     --out-dir transcripts/bakeoff/$S/scored --json transcripts/bakeoff/$S/bakeoff-score.json
 ```
 
@@ -504,11 +509,81 @@ the scoring, the bar and the runner's stdlib side. It needs no model and no GPU.
 
 ## 9. Results
 
-Not run.
+### 9.1 PSY777-F26-WK2-Mon: keep community-1
+
+**Runs.** POLARIS, one A100 80 GB (gpu01), 2026-10-05:
+- community-1 and 1x: job 50638, repo `d85abeb`;
+- DiariZen: job 50750, repo `30cdca0`;
+- Nemotron-3: job 50751, repo `30cdca0`.
+
+`30cdca0` only adds PR #31, which touches none of the bake-off code. Every provenance records
+the pinned revision from §1: community-1 `3533c8cf…`, DiariZen `027b3e22…`, Nemotron-3
+`f667ed73…`. Both new environments passed their build-time pin checks.
+
+- **Identity check:** passed. The stored turns reproduce `score_diarization.py`'s 56 student words.
+- **Determinism:** both runs gave identical turns, for every arm.
+- **G2:** every arm completed the whole 93.6-minute lecture in one call, natively, in both runs.
+
+| Arm | Labels | Student words → instructor (of 201) | High-harm runs | Missed changes | Boundaries | Precision exact / ±3 | Accuracy | Diarize time | Torch peak |
+|---|---|---|---|---|---|---|---|---|---|
+| community-1 (baseline) | 2 | **56** (27.9%) | 6 | 16 | 68 | 8.8% / 23.5% | 98.39% | 71 s | 1.6 GB |
+| 1x, exclusive | 2 | 58 (28.9%) | 7 | 15 | 68 | 10.3% / 20.6% | 98.33% | same call | same |
+| DiariZen v2 | 4 | 55 (27.4%) | 9 | 14 | 33 | 24.2% / 45.5% | 99.42% | 130 s | 11.2 GB |
+| Nemotron-3 | 3 | 56 (27.9%) | 7 | 12 | 32 | 31.2% / 40.6% | 99.43% | 23 s / 15 s | 3.7 GB |
+
+- The pessimistic fold (P2) equals the primary for every arm.
+- `nvidia-smi` peaks are not comparable between arms. The DiariZen and Nemotron-3 jobs shared
+  the node, and the sampler reports the node's busiest GPU. The table uses the runner's own
+  `torch.cuda` peak (allocated) instead.
+
+**Verdict: keep community-1.** No challenger meets P1, P2 or P3, and all meet G1. The
+2026-08-31 decision stands, now on measured evidence. The verdict holds unless PSY498 reopens
+it (§6.3).
+
+**Observations.** These are not part of the bar, and nothing switches on them.
+
+- **The high-harm error does not depend on which diarizer runs, on this recording.**
+  - Four student interjections are missed by every arm, at words 2330, 2897, 2954 and 4553.
+  - DiariZen and Nemotron-3 shrink the 44-word exchange at 4553 to 14 words, but miss other
+    student speech instead: DiariZen at 4475, Nemotron-3 at 2829. The student-word count
+    stays where it was.
+  - This fits far-field, quieter student speech on one mono recorder at the front.
+  - The repair plan's step 5 stays the route.
+- **The challengers are far better on the low-harm errors:**
+  - about half the boundaries (32–33 against 68);
+  - roughly 3× the exact-boundary precision;
+  - about a third of the wrong words (82–83 against 230).
+
+  The bar didn't ask about this. Fewer spurious boundaries would cut the repair plan's
+  candidate volume, because `shift` puts a window at every boundary. If that's worth a switch,
+  it needs its own pre-registered decision, measured on candidate volume and on PSY498.
+- **1x doesn't recover the exchange lost to the 5 ms overlap.** Exclusive turns put 2 more
+  student words under the instructor than the stored turns do.
+
+**Audit list (§6.2), for Mark's ear, optional.** These are challenger boundaries the gold
+calls spurious with no community-1 boundary within 3 words. They are listed by time, with no
+text.
+- **Two stretches flagged by both DiariZen and Nemotron-3 independently:**
+  - **00:28:51–00:29:01**, words 4567, 4571 and 4593. This is inside the 44-word student
+    exchange, so it's possibly a short instructor interjection;
+  - **00:52:59–00:53:01**, words 8592–8593, a one- or two-word island.
+- **Flagged by one model only:**
+  - DiariZen: 00:00:59.6, 00:01:02.1, 00:18:07.5, 00:28:14.4, 00:29:33.4 and 00:34:37.9;
+  - Nemotron-3: 00:28:31.9–00:28:39.3, 00:29:11.7–00:29:25.9 and 01:18:40.4;
+  - 1x: 01:14:05.4.
+
+Any change Mark confirms there gets reported here as a post-hoc sensitivity result. The
+numbers above stay the headline, and the gold isn't edited.
+
+### 9.2 PSY498-F26-WK3-Tue: frozen, not scored
+
+Every arm's two runs on PSY498 are written and frozen on POLARIS under
+`transcripts/bakeoff/PSY498-F26-WK3-Tue/`. Nobody has looked at them, and they wait on Mark's
+labels (§6.3).
 
 ---
 
-## 10. Amendments (dated; each made before any job ran)
+## 10. Amendments (dated; A1 was made before any job ran, A2 after)
 
 **A1 (2026-10-05): Mark's decisions on §1.4.** No result existed when these were made: no
 environment had been built and no job submitted.
@@ -528,4 +603,10 @@ environment had been built and no job submitted.
 - **Multiplicity, stated in advance:** three challengers on one lecture make it likelier that
   one passes by chance. The bar isn't tightened for this. PSY498 (§6.3) is the guard: any
   switch candidate is a recommendation subject to its held-out re-score.
+
+**A2 (2026-10-06): the §8 score command's argument order.** This is operational only. As
+first written, the command put `--gold-map` between the gold and the provenance files, and
+the driver's parser rejects that: no score was produced. The positionals now come first. The
+driver, the rule and the bar are unchanged. This was found when scoring, after the jobs had
+run.
 
