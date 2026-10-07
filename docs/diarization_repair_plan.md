@@ -1,6 +1,6 @@
 # Diarization repair: plan and manual to-dos
 
-**Status:** plan. Build steps 1–4 are done: the labeling sheet, Mark's labels, the baseline score (§1.7), and the candidate generator's recall (§1.8). **Step 4's generator (v1) fails its pre-registered bar** on one of five high-harm misses. Mark chose a held-out test over accepting it. A revised generator (v2) is pre-registered and built (§1.9). It passes on PSY777, but that lecture is its design set. **Step 5 waits on the held-out score.** That needs Mark's labels for PSY498-F26-WK3-Tue (Part 2, item 2). Nothing else is built. Decided 2026-09-30: speaker-attribution repair lives **here**,
+**Status:** plan. Build steps 1–4 are done: the labeling sheet, Mark's labels, the baseline score (§1.7), and the candidate generator's recall (§1.8). **Step 4's generator (v1) fails its pre-registered bar** on one of five high-harm misses. Mark chose a held-out test over accepting it. A revised generator (v2) is pre-registered and built (§1.9). It passes on PSY777, but that lecture is its design set. **Step 5 waits on the held-out score.** The diarizer bake-off (`docs/diarization_bakeoff_plan.md` §9) keeps community-1: no model tested cuts the high-harm error, so the repair pass stays the route. That needs Mark's labels for PSY498-F26-WK3-Tue (Part 2, item 2). Nothing else is built. Decided 2026-09-30: speaker-attribution repair lives **here**,
 upstream, not in any downstream consumer (D24 in `pipeline_plan.md`).
 **Part 1** is the design. **Part 2** is the manual work only Mark can do, including the
 labeling this plan needs before anything can be measured.
@@ -709,6 +709,9 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
      1. Is the recorder set to mono, or are the SD card's originals stereo and downmixed later?
         If they are stereo, keep the originals. The X/Y pair's two channels carry direction,
         which could separate the lecturer from the students.
+        **Answered 2026-10-06: mono.** No stereo originals exist. Switching to stereo for future
+        lectures is open. It needs a small spike first, since stage 1's handling of a stereo file
+        is unverified (`docs/diarization_bakeoff_plan.md` §7).
      2. Which way does the recorder face?
      3. Optional, if the lecturer agrees: a lavalier on one of the recorder's XLR inputs. That
         gives a channel that is almost only the lecturer.
