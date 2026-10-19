@@ -48,7 +48,7 @@ Same window, same flags, from a clean checkout of the recorded commit or later:
 
 ```bash
 python src/transcribe_audio.py -i data/251211_0009.wav -o transcripts/golden \
-    --start_time 00:05:00 --end_time 00:15:00 --dual_stream --job_id golden
+    --start_time 00:05:00 --end_time 00:15:00 --dual_stream --tag golden
 ```
 
 Expect the same token counts; timestamps may differ on a handful of bounds by ≤0.12 s

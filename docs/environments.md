@@ -129,8 +129,11 @@ from one batched pass on the ct2 backend (~11% more inference than one stream, a
 for a second pass). It writes a second preview file per stream.
 
 Outputs `<name>_raw.json` (schema v1, the record) and `<name>_preview.txt` (a stage-1
-preview, not the stage-2 render). Exit codes: **1** means audio ranges were lost and the
-transcript has holes; **2** means the model id or the requested mode was refused.
+preview, not the stage-2 render), where `<name>` is the audio's stem plus the date it was
+recorded, from its own metadata (D25): `PSY498-F26-WK6-Tue-2026-09-29`. Exit codes: **1** means
+audio ranges were lost and the transcript has holes; **2** means the run was refused before
+any work: an unknown model id, a refused mode, or a record of the same name already in the
+output directory (`--overwrite` replaces it, `--tag` writes beside it).
 
 `python transcribe_audio.py --help` lists the registered model ids. An unregistered id is
 refused rather than guessed at, so a new checkpoint needs a `ModelSpec` in
@@ -183,6 +186,12 @@ the one exception is noted in its row.
 source of `tests/fixtures/golden.json`: a visiting professor presenting their research, with host
 interaction. A copy is on the Mac as `data/Gard_Talk.wav` (`sha256` matches the fixture's record).
 It is *not* a research-participant interview: there is no interview recording in `data/` yet.
+
+**Recording dates (D25).** Stage 1 puts the date a recording was made into its output names,
+read from the file itself. Every Tascam WAV since the recorder was set to BWF carries one (the
+first is `PSY777-F26-WK5-Wed`, 2026-09-23), and both Voice Memos `.m4a` do. The WAVs before
+that carry no date at all, so rerunning one of them needs `--recorded_date YYYY-MM-DD`; without
+it the name has no date and the run warns.
 
 `.env` holds `HF_TOKEN` (mode 600), gitignored, required for pyannote.
 
