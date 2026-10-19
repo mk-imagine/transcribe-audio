@@ -21,15 +21,16 @@ import argparse
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
-from datetime import datetime
+from datetime import date
 from pathlib import Path
 from typing import List, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from pipeline import preview, schema  # noqa: E402
+from pipeline import preview, recording, schema  # noqa: E402
 from pipeline.orchestrator import CapabilityConflict, transcribe  # noqa: E402
 from pipeline.registry import (  # noqa: E402
     UnknownModelError, UnsupportedModelError, known_models,
@@ -148,17 +149,42 @@ def load_hotwords(spec: Optional[str]) -> List[str]:
 
 
 def output_basename(args) -> str:
-    # The original file's name, never the working excerpt's: with --start_time
-    # the excerpt is a temp file, and naming outputs after it produced
-    # "temp_segment_004500_geisler_seg_004500_jobverbatim_raw.json".
+    """<audio stem>-<recorded date>[_seg_<start>][_<tag>].
+
+    The original file's name, never the working excerpt's: with --start_time
+    the excerpt is a temp file, and naming outputs after it produced
+    "temp_segment_004500_geisler_seg_004500_jobverbatim_raw.json".
+
+    The date is when the recording was made, from its own metadata, so a
+    transcript can be found by the day it was recorded. The SLURM job id is no
+    longer part of the name: it is in the record (``run.slurm_job_id``), and in
+    a file name it said which run made a transcript, which matters less than
+    what was recorded and when. A name that already holds the date, such as
+    PhD-Applications-Discussion-2026-10-07, does not get it twice.
+    """
     name = Path(getattr(args, "source_path", None) or args.input_path).stem
+    day = (getattr(args, "recorded", None) or {}).get("date")
+    if day and day not in name:
+        name += f"-{day}"
     if args.start_time:
         name += f"_seg_{args.start_time.replace(':', '')}"
-    if args.job_id:
-        name += f"_job{args.job_id}"
-    else:
-        name += datetime.now().strftime("_%Y%m%d-%H%M%S")
+    if args.tag:
+        name += f"_{args.tag}"
     return name
+
+
+def _tag(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", value):
+        raise argparse.ArgumentTypeError(
+            f"{value!r}: use letters, digits, '.', '_' and '-'; it goes into a file name")
+    return value
+
+
+def _iso_date(value: str) -> str:
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a YYYY-MM-DD date") from None
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -221,7 +247,19 @@ def build_parser() -> argparse.ArgumentParser:
                         "cleaning moves to annotate.py as a tagger.")
     p.add_argument("--start_time", default=None)
     p.add_argument("--end_time", default=None)
-    p.add_argument("--job_id", default=None)
+    # Replaces --job_id, which named outputs <stem>_job<id> and was also used
+    # to keep dissenter runs apart (--job_id ${M##*/}). The job id is in the
+    # record now; telling runs of one recording apart is this flag's job.
+    p.add_argument("--tag", type=_tag, default=None,
+                   help="Appended to the output name, <name>_<tag>_raw.json, to keep "
+                        "runs of one recording apart, e.g. a dissenter's model name.")
+    p.add_argument("--recorded_date", type=_iso_date, default=None,
+                   help="YYYY-MM-DD. When the recording was made, for a file whose "
+                        "metadata does not say (WAVs from before the recorder was set "
+                        "to BWF). Overrides the metadata; both are kept in the record.")
+    p.add_argument("--overwrite", action="store_true",
+                   help="Replace an existing record of the same name. Without it the "
+                        "run is refused before any work (exit 2).")
     return p
 
 
@@ -241,14 +279,39 @@ def main() -> None:
             "are tagged in annotate.py, never deleted.", args.clean_mode,
         )
 
+    # The record names the original audio; input_path becomes the working
+    # excerpt or decode, which is deleted when the run ends. The date is read
+    # from the original too: an excerpt or a decode carries no metadata.
+    args.source_path = args.input_path
+    found = recording.from_metadata(Path(args.source_path))
+    if args.recorded_date:
+        args.recorded = recording.given_by_hand(args.recorded_date, found)
+        if found["date"] and found["date"] != args.recorded["date"]:
+            logger.warning("--recorded_date %s overrides the file's own date, %s (from %s). "
+                           "Both are kept in the record.", args.recorded["date"],
+                           found["date"], found["from"])
+    else:
+        args.recorded = found
+        if found["date"]:
+            logger.info("Recorded %s %s (from %s)", found["date"], found.get("start") or "", found["from"])
+        else:
+            logger.warning("No recording date: %s. The output name will not carry one; "
+                           "pass --recorded_date YYYY-MM-DD to supply it.", found["why"])
+
     output_dir = Path(args.output_dir)
+    base = output_basename(args)
+    # Checked before any work. The job id used to keep every run's outputs
+    # apart; without it a second run of the same recording would overwrite
+    # the first record after hours on a GPU.
+    record_path = output_dir / f"{base}_raw.json"
+    if record_path.exists() and not args.overwrite:
+        logger.error("%s already exists. Refusing before any work: pass --overwrite to "
+                     "replace it, --tag to write beside it, or another --output_dir.", record_path)
+        sys.exit(2)
     output_dir.mkdir(parents=True, exist_ok=True)
     handler = AudioHandler(output_dir)
 
     try:
-        # The record names the original audio; input_path becomes the working
-        # excerpt or decode, which is deleted when the run ends.
-        args.source_path = args.input_path
         args.input_path = str(
             handler.prepare_segment(Path(args.input_path), args.start_time, args.end_time)
         )
@@ -261,8 +324,7 @@ def main() -> None:
     finally:
         handler.cleanup()
 
-    base = output_basename(args)
-    schema.write(output_dir / f"{base}_raw.json", doc)
+    schema.write(record_path, doc)
     txt_path = output_dir / f"{base}_preview.txt"
     txt_path.write_text(preview.render(doc, timestamps=not args.no_timestamps))
     logger.info("Preview written to: %s", txt_path)

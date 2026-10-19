@@ -32,11 +32,14 @@ from __future__ import annotations
 
 import argparse
 import re
-import struct
 import sys
 from datetime import date, datetime, time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from pipeline.recording import read_bwf  # noqa: E402  (one bext reader, shared with stage 1)
 
 # ---------------------------------------------------------------- calendar ---
 
@@ -127,29 +130,11 @@ def recording_span(path: Path) -> Optional[Span]:
     few seconds before OriginationTime, which is therefore when the file was
     closed, not when it began, and is not used.
     """
-    tref = rate = byte_rate = data_len = None
-    with open(path, "rb") as f:
-        head = f.read(12)
-        if len(head) < 12 or head[:4] != b"RIFF" or head[8:] != b"WAVE":
-            return None
-        while True:
-            head = f.read(8)
-            if len(head) < 8:
-                break
-            cid, size = struct.unpack("<4sI", head)
-            body_at = f.tell()
-            if cid == b"bext" and size >= 346:
-                f.seek(body_at + 338)  # past Description, Originator, OriginatorReference, Date, Time
-                (tref,) = struct.unpack("<Q", f.read(8))
-            elif cid == b"fmt " and size >= 16:
-                _, _, rate, byte_rate = struct.unpack("<HHII", f.read(12))
-            elif cid == b"data":
-                data_len = size
-            f.seek(body_at + size + (size & 1))
-    if tref is None or not rate or not byte_rate or data_len is None:
+    bwf = read_bwf(path)
+    if bwf is None or not bwf.sample_rate or not bwf.byte_rate or bwf.data_bytes is None:
         return None
-    start = tref / rate
-    return start, start + data_len / byte_rate
+    start = bwf.time_reference / bwf.sample_rate
+    return start, start + bwf.data_bytes / bwf.byte_rate
 
 
 def course_for(day: date, span: Optional[Span], courses: Dict[str, dict]) -> Tuple[Optional[str], str]:

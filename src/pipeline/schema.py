@@ -101,6 +101,8 @@ def write(path: Path, doc: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as fh:
         json.dump(doc, fh, indent=2)
+    # hpc/transcribe_parallel.slurm finds the record by this line in the run's
+    # log: the name depends on the recording's metadata, which the shell cannot read.
     logger.info("Wrote raw JSON (schema v%s): %s", doc.get("schema_version"), path)
 
 

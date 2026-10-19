@@ -268,6 +268,10 @@ def _source_block(args, processed: Path, duration: float) -> Dict[str, Any]:
         "audio_sha256": provenance.sha256_file(original),
         "duration_s": round(duration, 3),
     }
+    # When the recording was made, from its own metadata (pipeline/recording.py).
+    # Absent from records written before 2026-10-19.
+    if getattr(args, "recorded", None) is not None:
+        block["recorded"] = args.recorded
     if getattr(args, "transcoded_from", None):
         block["transcoded"] = {"from": args.transcoded_from, "to": "pcm_s16le wav, one decode",
                                "why": "compressed sources are re-decoded per window by seeking readers (bug 9)"}
