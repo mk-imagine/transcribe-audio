@@ -40,7 +40,7 @@ words inside a window:
 | PSY777-F26-WK4-Mon | 109.5 | 7.3% | 74.6 | 6.8% |
 | PSY777-F26-WK4-Wed | 166.5 | 12.6% | 104.5 | 11.6% |
 | PSY777-F26-WK5-Mon | 151.1 | 13.1% | 104.6 | 12.3% |
-| PSY582-S26-WK9-Thu | 121.0 | 10.6% | 117.1 | 10.7% |
+| PSY582-S26-WK8-Thu | 121.0 | 10.6% | 117.1 | 10.7% |
 | PSY582-S26-WK12-Thu | 80.8 | 7.9% | 63.8 | 7.3% |
 
 The marginal costs quoted below are the drop in v2's sites per hour when that one revision is
@@ -289,7 +289,7 @@ Overall recall is reported, not gated. If the bar fails, v1 §5 applies: report 
      PSY498's labels exist, by someone who has not seen them or that lecture's text.
 2. **Mark labels without candidates.** No candidate file for PSY498 is generated or shown
    until his labels check complete (`complete: true`, 0 errors), so no window can steer his
-   attention. The sheet is `transcripts/lectures/PSY498-F26-WK3-Tue_job49865_labels.md`,
+   attention. The sheet is `transcripts/lectures/PSY498-F26-WK3-Tue-2026-09-08_labels.md`,
    with the PSY777 sheet's grammar. If he writes a richer notation again, it is converted as
    §1.7 did: by a logged helper beside an untouched original, with operator answers quoted.
    That happens before any candidate exists.
@@ -422,7 +422,7 @@ It works for any number of labels. The resolved map, each label's stated counts,
 ### 6.7 Commands
 
 ```bash
-L=transcripts/lectures/PSY498-F26-WK3-Tue_job49865
+L=transcripts/lectures/PSY498-F26-WK3-Tue-2026-09-08
 python3 scripts/diarization_labels.py --check ${L}_labels.md
 python3 scripts/score_diarization.py ${L}_labels.json --speaker-map auto --json ${L}_baseline-score.json
 python3 scripts/diarization_candidates.py --version 1 ${L}_raw.json

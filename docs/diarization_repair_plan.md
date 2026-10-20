@@ -195,7 +195,7 @@ between the two labels.
 
 ```bash
 python3 scripts/score_diarization.py \
-    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.normalized.json \
+    transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_labels.normalized.json \
     --speaker-map SPEAKER_01=L,SPEAKER_00=S
 ```
 
@@ -296,10 +296,10 @@ results were seen**, so there are no post-hoc numbers to report. Aggregate numbe
 indices only. The candidates and the score stay in `transcripts/`.
 
 ```bash
-python3 scripts/diarization_candidates.py transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json
+python3 scripts/diarization_candidates.py transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_raw.json
 python3 scripts/score_candidates.py \
-    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.normalized.json \
-    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_speaker_candidates.json \
+    transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_labels.normalized.json \
+    transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_speaker_candidates.json \
     --speaker-map SPEAKER_01=L,SPEAKER_00=S
 ```
 
@@ -496,10 +496,10 @@ every number §1.8 reports is unchanged.
 v2 is frozen at commit `a5b7900`, parameter hash `0c77f39d…`.
 
 ```bash
-python3 scripts/diarization_candidates.py --version 2 transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json
+python3 scripts/diarization_candidates.py --version 2 transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_raw.json
 python3 scripts/score_candidates.py \
-    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.normalized.json \
-    transcripts/lectures/PSY777-F26-WK2-Mon_job49864_speaker_candidates_v2.json \
+    transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_labels.normalized.json \
+    transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_speaker_candidates_v2.json \
     --speaker-map SPEAKER_01=L,SPEAKER_00=S
 ```
 
@@ -566,7 +566,7 @@ The pre-registered prediction was 5/5, about 78 sites/h and about 9%. It was met
 | PSY777-F26-WK4-Mon | 109.5 | 7.3% | 74.6 | 6.8% |
 | PSY777-F26-WK4-Wed | 166.5 | 12.6% | 104.5 | 11.6% |
 | PSY777-F26-WK5-Mon | 151.1 | 13.1% | 104.6 | 12.3% |
-| PSY582-S26-WK9-Thu | 121.0 | 10.6% | 117.1 | 10.7% |
+| PSY582-S26-WK8-Thu | 121.0 | 10.6% | 117.1 | 10.7% |
 | PSY582-S26-WK12-Thu | 80.8 | 7.9% | 63.8 | 7.3% |
 
 v2 stays under both caps on all eight, with room to spare. v1 comes within 14 sites/h of the
@@ -600,7 +600,8 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
 ### Blocking this plan
 
 1. **Label every speaker change in one transcript.** Chosen: **PSY777-F26-WK2-Mon**
-   (`transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json`, the 2026-08-31 lecture, 93 min,
+   (`transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_raw.json`, the 2026-08-31 lecture, 93 min;
+   `PSY777-F26-WK2-Mon_job49864_*` until the D25 rename on 2026-10-19,
    2 diarizer labels). It is the same lecture the study-notes spikes used, so the labels serve
    both projects. Two parts:
    - **Part A — review the diarizer's boundaries.** Mark each place the label changes `real`,
@@ -616,8 +617,8 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
    - **One read-through does both.** Generate the sheet and check it as you go:
 
      ```bash
-     python3 scripts/diarization_labels.py transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json
-     python3 scripts/diarization_labels.py --check transcripts/lectures/PSY777-F26-WK2-Mon_job49864_labels.md
+     python3 scripts/diarization_labels.py transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_raw.json
+     python3 scripts/diarization_labels.py --check transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_labels.md
      ```
 
      The sheet (`<stem>_labels.md`) is the lecture profile's stream, one line per sentence as
@@ -660,13 +661,13 @@ created in spike S3 of the study-notes plan was written by a Claude session, not
      `<stem>_labels.questions.md` the same day, and the §1.7 numbers are final under his answers.
 2. **Label PSY498-F26-WK3-Tue, the held-out lecture** (§1.9; protocol in
    `docs/diarization_candidates_v2_plan.md` §6). Step 5 waits on this.
-   - **The sheet is already generated:** `transcripts/lectures/PSY498-F26-WK3-Tue_job49865_labels.md`,
+   - **The sheet is already generated:** `transcripts/lectures/PSY498-F26-WK3-Tue-2026-09-08_labels.md`,
      with 52 boundary blocks. The raw turns change label 181 times.
    - **The grammar and procedure are item 1's,** Parts A and B in one read-through. Check as
      you go:
 
      ```bash
-     python3 scripts/diarization_labels.py --check transcripts/lectures/PSY498-F26-WK3-Tue_job49865_labels.md
+     python3 scripts/diarization_labels.py --check transcripts/lectures/PSY498-F26-WK3-Tue-2026-09-08_labels.md
      ```
 
    - **Fill `who:` on every `real` boundary.** The scorer's speaker map is computed from the

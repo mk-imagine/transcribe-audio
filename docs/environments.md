@@ -111,7 +111,7 @@ LD_LIBRARY_PATH=$HOME/miniforge3/envs/diarizen/lib mamba run -n diarizen python 
 
 ```bash
 # from src/, in cw2native
-python -u transcribe_audio.py -i ../data/PSY582-S26-WK9-Thu.wav -o ../transcripts/out \
+python -u transcribe_audio.py -i ../data/PSY582-S26-WK8-Thu.wav -o ../transcripts/out \
     --start_time 00:45:00 --end_time 00:46:30 --no_diarize --mode verbatim
 ```
 
@@ -175,7 +175,7 @@ the one exception is noted in its row.
 
 | file | duration | notes |
 |---|---|---|
-| `PSY582-S26-WK9-Thu.wav` | 91.7 min | **Was `geisler.wav`.** Lecture, **disfluency-rich**: the reference for verbatim testing. The 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
+| `PSY582-S26-WK8-Thu.wav` | 91.7 min | **Was `geisler.wav`, then `PSY582-S26-WK9-Thu.wav` until 2026-10-19**, when the week was corrected: recorded Thu 2026-04-02, four weeks before WK12 (spring recess was March 23–28). Lecture, **disfluency-rich**: the reference for verbatim testing. The 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
 | `PSY582-S26-WK12-Thu.wav` | 66.8 min | PSY 582, Spring 2026 week 12 Thursday, 2026-04-30. |
 | `PSY498-F26-WK2-Tue.wav`, `-WK4-`, `-WK5-` | 143–146 min | PSY 498, Tuesdays. The long lectures: community-1 splits them into 7–13 speaker labels (§10). |
 | `PSY498-F26-WK3-Tue.wav` | 49.9 min | PSY 498, week 3 Tuesday. |
@@ -232,6 +232,6 @@ Throughput measured on 300 s of audio, A100, correctly configured:
 | `ARK-ASR-0.6B` | 36 | 30 s audio cap → 10 calls per 300 s |
 
 The 12-window sweep used for every comparison: windows at 5/15/30/45/60/75 min, 90 s each,
-across `geisler.wav` (now `PSY582-S26-WK9-Thu.wav`) and `251211_0009.wav`. Outputs land in
+across `geisler.wav` (now `PSY582-S26-WK8-Thu.wav`) and `251211_0009.wav`. Outputs land in
 `transcripts/wide/<tag>__<file>/`. Metrics: word count, disfluency markers, duplicate-8-gram
 rate (loop detection), and cross-model disagreement.
