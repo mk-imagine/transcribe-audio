@@ -568,6 +568,10 @@ def _():
     b = ta.build_parser().parse_args(["-i", "data/PhD-Applications-Discussion-2026-10-07.wav"])
     b.recorded = {"date": "2026-10-07"}
     assert ta.output_basename(b) == "PhD-Applications-Discussion-2026-10-07", "date doubled"
+    # rename_recordings.py names a recording with its date, so the transcript shares the recording's name
+    r = ta.build_parser().parse_args(["-i", "data/PSY777-F26-WK9-Mon-2026-10-19.wav"])
+    r.recorded = {"date": "2026-10-19"}
+    assert ta.output_basename(r) == "PSY777-F26-WK9-Mon-2026-10-19", "date doubled"
     c = ta.build_parser().parse_args(["-i", "data/PSY777-F26-WK2-Mon.wav"])
     c.recorded = {"date": None, "why": "no bext"}
     assert ta.output_basename(c) == "PSY777-F26-WK2-Mon", "no date in the file, none in the name"

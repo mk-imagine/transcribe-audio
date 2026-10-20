@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rename recorder files (YYMMDD_XXXX.wav) to course-and-week names.
+"""Rename recorder files (YYMMDD_XXXX.wav) to course, week and date names.
 
     python scripts/rename_recordings.py data/            # dry run: shows old -> new
     python scripts/rename_recordings.py data/ --apply    # actually rename
@@ -10,14 +10,19 @@ Tuesday in the third week of Fall 2026 is PSY 498, F26, week 3. Add each new
 semester to SEMESTERS below; keep the old ones, so an old recording still
 renames correctly.
 
-Naming: PSY<code>-<term>-WK<N>-<Day>.<ext>, e.g. PSY777-F26-WK1-Mon.wav,
-PSY498-F26-WK1-Tue.wav. The term keeps a course code that recurs in a later
-semester from colliding with its earlier names. The day is always present: a
-course that meets twice a week needs it, and one name shape for every file is
-easier to read and to glob. Two recordings on the same day get -1, -2 in
-recorder order. Nothing is ever overwritten; a clash is reported and the file
-is left alone. Files outside every semester, on days with no class, or not in
-the recorder's format are skipped and listed.
+Naming: PSY<code>-<term>-WK<N>-<Day>[-<k>]-<YYYY-MM-DD>.<ext>, e.g.
+PSY777-F26-WK1-Mon-2026-08-24.wav, PSY498-F26-WK1-Tue-2026-08-25.wav. The term
+keeps a course code that recurs in a later semester from colliding with its
+earlier names. The day is always present: a course that meets twice a week
+needs it, and one name shape for every file is easier to read and to glob. The
+date comes last, as in the transcript names (D25): stage 1 appends the
+recording date to the audio's name unless the name already holds it, so a
+recording and its transcript share one name. It is the recorder's own date,
+from its YYMMDD file name -- the same clock that writes the BWF date. Two
+recordings on the same day get -1, -2 in recorder order, before the date.
+Nothing is ever overwritten; a clash is reported and the file is left alone.
+Files outside every semester, on days with no class, or not in the recorder's
+format are skipped and listed.
 
 On a day two courses share, the recording's own clock decides: the BWF `bext`
 chunk the recorder writes into the file (set the recorder to BWF). Its
@@ -183,7 +188,7 @@ def target_name(code: str, term: str, week: int, day: date, ext: str, *,
     name = f"{prefix}{code}-{term}-WK{week}-{WEEKDAYS[day.weekday()]}"
     if same_day_index is not None:
         name += f"-{same_day_index}"
-    return f"{name}.{ext.lower()}"
+    return f"{name}-{day.isoformat()}.{ext.lower()}"
 
 
 def plan(directory: Path, *, semesters: List[dict] = SEMESTERS,

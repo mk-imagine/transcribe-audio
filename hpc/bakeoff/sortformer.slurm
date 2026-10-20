@@ -5,7 +5,7 @@
 # §1). Its own env, bakeoff-nemo: build it first with
 #   bash envs/bakeoff-nemo.sh > scratch/logs/env_bakeoff-nemo.log 2>&1
 #
-#   sbatch hpc/bakeoff/sortformer.slurm data/PSY777-F26-WK2-Mon.wav data/PSY498-F26-WK3-Tue.wav
+#   sbatch hpc/bakeoff/sortformer.slurm data/PSY777-F26-WK2-Mon-2026-08-31.wav data/PSY498-F26-WK3-Tue-2026-09-08.wav
 #
 # Submit from the repo root: --output is relative to it (hpc/README.md).
 #SBATCH --job-name=bo-sortformer

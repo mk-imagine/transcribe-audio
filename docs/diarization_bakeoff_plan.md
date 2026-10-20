@@ -492,6 +492,10 @@ for A in community1 diarizen sortformer; do
   sbatch hpc/bakeoff/$A.slurm data/PSY777-F26-WK2-Mon.wav data/PSY498-F26-WK3-Tue.wav
 done
 
+# The recordings were renamed on 2026-10-19 to end in their date (D25):
+# data/PSY777-F26-WK2-Mon-2026-08-31.wav, data/PSY498-F26-WK3-Tue-2026-09-08.wav. The commands
+# here are as they ran; the outputs stay under the old stems in transcripts/bakeoff/.
+
 # On the Mac: copy transcripts/bakeoff/ back (no text in it, but it stays in gitignored
 # transcripts/), then score PSY777 only.
 S=PSY777-F26-WK2-Mon
