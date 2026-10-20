@@ -86,14 +86,24 @@ python src/transcribe_audio.py -i <audio> -o <dir> [options]
 | `--compute_type` | float16 on CUDA, float32 on CPU by default; ct2 refuses float16 on CPU. |
 | `--device cuda\|cpu` | CUDA if available. MPS is not a target. |
 | `--adapter NAME` | force an adapter for an unregistered checkpoint. Recorded in the output as an override. |
-| `--job_id X` | names the output `<stem>_jobX_raw.json`; the SLURM wrapper passes the job id. |
+| `--tag X` | appended to the output name, `<name>_X_raw.json`, to keep runs of one recording apart (the dissenters below use the model name). |
+| `--recorded_date YYYY-MM-DD` | the recording date, for a file whose metadata has none. Overrides the metadata; both are kept in the record. |
+| `--overwrite` | replace an existing record of the same name. Without it the run is refused before any work. |
 
-**Outputs:** `<stem>_raw.json` (the record — see *The record* below) and `<stem>_preview.txt`, a
+**Outputs:** `<name>_raw.json` (the record — see *The record* below) and `<name>_preview.txt`, a
 readable preview that is *not* the stage-2 render. With `--dual_stream`, a second preview for
 the other stream.
 
+**Names (D25):** `<audio stem>-<recorded date>`, e.g. `PSY498-F26-WK6-Tue-2026-09-29_raw.json`.
+The date is when the recording was made, read from the file's own metadata: the BWF `bext`
+chunk the Tascam writes (once set to BWF), or the `udta` date in a Voice Memos `.m4a`. A file
+with neither gets no date in its name, and a warning; WAVs recorded before 2026-09-23 have none.
+A name that already holds the date is not given it twice. An excerpt adds `_seg_<start>`, and
+`--tag` adds `_<tag>`. The SLURM job id is in the record (`run.slurm_job_id`), not the name.
+
 **Exit codes:** `1` — audio ranges were lost and the transcript has holes (the ranges are in the
-record's `errors`); `2` — the model id or the requested mode was refused.
+record's `errors`); `2` — the run was refused before any work: an unknown model id, a refused
+mode, or a record of the same name already there.
 
 ### On the cluster
 
@@ -124,14 +134,14 @@ fluent view of the verbatim primary, so disfluencies cannot be flagged — becom
 five real garbles caught on a name-dense window.
 
 ```bash
-# three ordinary stage-1 runs, in audio-transcribe-tf5
+# three ordinary stage-1 runs, in audio-transcribe-tf5; --tag keeps each beside the primary
 for M in Audio8/ARK-ASR-0.6B nvidia/parakeet-tdt-0.6b-v3 ibm-granite/granite-speech-5.0-470m-turboctc; do
-    python src/transcribe_audio.py -i data/x.wav -o transcripts/ --model $M --no_diarize --job_id ${M##*/}
+    python src/transcribe_audio.py -i data/x.wav -o transcripts/ --model $M --no_diarize --tag ${M##*/}
 done
 
-# then, anywhere, in a second
-python src/annotate.py transcripts/x_raw.json --dissenters transcripts/x_job*_raw.json
-#    -> transcripts/x_annotated.json  (render this instead of x_raw.json)
+# then, anywhere, in a second. X is the primary's name, e.g. PSY498-F26-WK6-Tue-2026-09-29
+python src/annotate.py transcripts/X_raw.json --dissenters transcripts/X_*_raw.json
+#    -> transcripts/X_annotated.json  (render this instead of X_raw.json)
 ```
 
 | option | meaning |
@@ -197,11 +207,12 @@ timestamp is the durable reference.** In the coding profile a `proper_noun_candi
 
 ## The record (schema v1)
 
-`<stem>_raw.json`, the lossless output of stage 1. The parts you will read:
+`<name>_raw.json`, the lossless output of stage 1. The parts you will read:
 
 ```jsonc
 {
   "source":       { "audio_path": "...", "audio_sha256": "...", "duration_s": 600.0,
+                    "recorded": { "date": "2026-09-29", "start": "09:01:01", "from": "bext", ... },
                     "excerpt": { "start_time": "00:05:00", "offset_s": 300.0, ... } },
   "run":          { "created_utc": "...", "device": "cuda", "slurm_job_id": "...",
                     "pipeline_version": { "commit": "...", "dirty": false }, "packages": { ... } },
@@ -267,7 +278,7 @@ python3 tests/check_candidates.py  # 47: the diarization repair candidates, v1 f
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified
-on real audio**: an `sbatch` run against `data/PSY582-S26-WK9-Thu.wav` (formerly `geisler.wav`) at 45:00–46:30, where the reference
+on real audio**: an `sbatch` run against `data/PSY582-S26-WK8-Thu.wav` (formerly `geisler.wav`) at 45:00–46:30, where the reference
 expectation is ~10 filled-pause markers with per-word timestamps on every token including the
 markers. This project has been burned three times by a model integration that ran, produced
 plausible output, and was wrong — read a model's own card and package before writing to it.

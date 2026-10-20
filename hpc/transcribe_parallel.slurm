@@ -64,16 +64,20 @@ run_one() {
     echo "START $(date +%T)  gpu $gpu  $audio  (log $log)"
     # $FLAGS is unquoted on purpose: it carries several flags.
     CUDA_VISIBLE_DEVICES=$gpu OMP_NUM_THREADS=$THREADS MKL_NUM_THREADS=$THREADS TORCH_NUM_THREADS=$THREADS \
-        python -u "$PIPELINE" -i "$audio" -o "$OUT" $FLAGS --job_id "$SLURM_JOB_ID" > "$log" 2>&1
+        python -u "$PIPELINE" -i "$audio" -o "$OUT" $FLAGS > "$log" 2>&1
     local rc=$?
     # Exit 1 means audio ranges were lost and the transcript has holes; 2 means
-    # the model id or the requested mode was refused.
+    # the run was refused before any work (model id, mode, or the record exists).
     echo "EXIT=$rc $(date +%T)  gpu $gpu  $audio"
-    # The pipeline inserts _seg_<start> into the name of an excerpt run.
-    local record="$OUT/${name}_job${SLURM_JOB_ID}_raw.json" seg
-    for seg in "$OUT/${name}"_seg_*"_job${SLURM_JOB_ID}_raw.json"; do
-        [ -f "$seg" ] && record=$seg
-    done
+    # The record's name carries the recording date from the audio's own
+    # metadata, which the shell cannot read, so take the path the run logged
+    # (schema.write's "Wrote raw JSON" line).
+    local record
+    record=$(sed -n 's/.*Wrote raw JSON (schema v[^)]*): //p' "$log" | tail -n 1)
+    if [ -z "$record" ]; then
+        echo "RECORD ${name}  MISSING (no record written; see $log)"
+        return
+    fi
     python - "$REPO_ROOT/src" "$record" <<'EOF'
 import sys
 sys.path.insert(0, sys.argv[1])

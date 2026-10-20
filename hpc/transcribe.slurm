@@ -65,14 +65,15 @@ echo "Starting job $SLURM_JOB_ID at $(date)"
 
 # `set -e` would abort before the status could be logged, so the exit code is
 # checked explicitly. Exit 1 means audio ranges were lost and the transcript
-# has holes; exit 2 means the model id or the requested mode was refused.
+# has holes; exit 2 means the run was refused before any work: an unknown
+# model id, a refused mode, or a record of the same name already there.
+# The job id is not passed: the record reads it from SLURM_JOB_ID.
 set +e
 python -u "$PIPELINE" \
     --input_path "$1" \
     --output_dir "$2" \
     --clean_mode "$3" \
     --hf_token "$4" \
-    --job_id $SLURM_JOB_ID \
     $5
 exit_code=$?
 set -e

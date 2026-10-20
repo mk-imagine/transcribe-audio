@@ -51,7 +51,7 @@ device selection, and stage-1 text cleaning.
 Not yet written: `annotate.py` (stage 1.5), `render.py` and everything under `src/render/`
 (stage 2, Phase 2), `align.py`, and the Granite adapter (Phase 3).
 
-Sample data: `data/PSY582-S26-WK9-Thu.wav` (formerly `geisler.wav`, the verbatim reference) and
+Sample data: `data/PSY582-S26-WK8-Thu.wav` (formerly `geisler.wav`, the verbatim reference) and
 `data/PSY777-F26-WK1-Wed.m4a` (see `docs/environments.md`). The old output `transcripts/lecture transcript.txt` — fully
 normalized prose, zero disfluencies, no timestamps, multi-thousand-word paragraph blocks — is
 what this work replaces: fine as lecture notes, **unusable for coding**.
@@ -88,6 +88,7 @@ Settled. Each entry records what would reopen it.
 | D15 | **Non-commercial weights accepted** | Non-commercial academic research; not researching model methods, just using them. | Work becomes commercial or ships tooling with weights |
 | D16 | **QDA tool export deferred** | No budget; coding is manual on paper. The raw JSON is the hedge — an exporter is a stage-2 renderer, never a re-transcription. | A QDA tool is adopted |
 | D24 | **Speaker-attribution repair lives in this pipeline, as a stage 1.5 sidecar applied at render time.** Plan: `docs/diarization_repair_plan.md`. | Diarization errors originate here and every consumer inherits them: coding profile, lecture profile, the study-notes pipeline, interviews. One fix at the producer, not one per consumer. D3 holds: raw `speaker_turns` are never rewritten. | The repair pass fails its own adoption gate (zero false merges introduced) |
+| D25 | **Output names carry the date the recording was made, read from the audio's own metadata; the SLURM job id is in the record only.** `<audio stem>-<YYYY-MM-DD>[_seg_<start>][_<tag>]_raw.json`; the date is also kept as `source.recorded`. | A transcript is looked up by the day it was recorded; course and week alone made that a calendar lookup. The date comes from the BWF `bext` chunk or the Voice Memos MP4 `udta` date (`pipeline/recording.py`), never the file's modification time, which a copy resets, and never the semester calendar, which would put a name parser in stage 1. A file with neither gets no date and a warning; `--recorded_date` supplies one. The job id said which run made a file, which `run.slurm_job_id` already records. It also kept runs apart, so stage 1 now refuses an existing record before any work (exit 2) unless `--overwrite`, and `--tag` keeps the dissenters apart, a job `--job_id ${M##*/}` was doing on the side. | The recorder's clock proves unreliable, or recordings arrive from a device that writes neither field |
 
 ---
 
@@ -559,6 +560,10 @@ word index monotonicity, timing ordering and the speaker/speaker_source coupling
 {
   "schema_version": "1.0",
   "source":  { "audio_path": "...", "audio_sha256": "...", "duration_s": 90.0,
+               // when the recording was made, from its own metadata (D25); date is
+               // null, with "why", when the file does not say
+               "recorded": { "date": "2026-09-29", "start": "09:01:01", "from": "bext",
+                             "clock": "recorder's local time" },
                // present only for a --start_time run: the working excerpt is a
                // temp file that is deleted, so the *original* is named and hashed
                "excerpt": { "start_time": "00:45:00", "end_time": "00:46:30",
@@ -992,11 +997,12 @@ model, `pipeline/fluent.py` for the view and the conjunction, and `src/annotate.
 ```bash
 # three ordinary stage-1 runs, in audio-transcribe-tf5 (they run in ~+8% of the primary's time)
 for M in Audio8/ARK-ASR-0.6B nvidia/parakeet-tdt-0.6b-v3 ibm-granite/granite-speech-5.0-470m-turboctc; do
-    python src/transcribe_audio.py -i x.wav -o transcripts/ --model $M --no_diarize --job_id ${M##*/}
+    python src/transcribe_audio.py -i x.wav -o transcripts/ --model $M --no_diarize --tag ${M##*/}
 done
-# then, anywhere, instantly
-python src/annotate.py transcripts/x_raw.json --dissenters transcripts/x_job*_raw.json
-python src/render.py transcripts/x_annotated.json --profile coding       # candidates print as  word [NAME?]
+# then, anywhere, instantly. X is the primary's name (D25: stem plus recorded date);
+# the runs above used --job_id for the tag until D25 replaced it.
+python src/annotate.py transcripts/X_raw.json --dissenters transcripts/X_*_raw.json
+python src/render.py transcripts/X_annotated.json --profile coding       # candidates print as  word [NAME?]
 ```
 
 Verified end to end on the A100 (job 48749): three dissenter records through

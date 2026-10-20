@@ -459,6 +459,175 @@ def _():
         assert not plan_for(c, mode="verbatim").ok
 
 
+# ------------------------------------------------- recording date, names ----
+
+def _bext_wav(path, *, odate=b"2026-09-29", otime=b"11:22:04", start_s=9 * 3600 + 61, rate=8, seconds=4):
+    """A Tascam-shaped BWF: bext (OriginationDate/Time = file close), fmt, data."""
+    import struct
+    bext = bytearray(1116)
+    bext[320:330] = odate.ljust(10, b"\0")
+    bext[330:338] = otime.ljust(8, b"\0")
+    bext[338:346] = struct.pack("<Q", round(start_s * rate))
+    data = bytes(2 * rate * seconds)
+    fmt = struct.pack("<HHIIHH", 1, 1, rate, 2 * rate, 2, 16)
+    body = b"WAVE" + b"bext" + struct.pack("<I", len(bext)) + bext \
+        + b"fmt " + struct.pack("<I", 16) + fmt + b"data" + struct.pack("<I", len(data)) + data
+    path.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+
+
+def _box(kind, body):
+    import struct
+    return struct.pack(">I4s", 8 + len(body), kind) + body
+
+
+def _m4a(path, date_text=None):
+    """Voice Memos' layout: ftyp, mdat, then moov holding udta/date and udta/meta."""
+    udta = (_box(b"date", date_text.encode()) if date_text else b"") + _box(b"meta", bytes(12))
+    moov = _box(b"moov", _box(b"mvhd", bytes(100)) + _box(b"udta", udta))
+    path.write_bytes(_box(b"ftyp", b"M4A \0\0\0\0") + _box(b"mdat", bytes(64)) + moov)
+
+
+@check("recording date: BWF bext gives the local date and TimeReference the start")
+def _():
+    from pipeline import recording
+    with tempfile.TemporaryDirectory() as td:
+        w = Path(td) / "a.wav"
+        _bext_wav(w)
+        r = recording.from_metadata(w)
+        assert (r["date"], r["start"], r["from"]) == ("2026-09-29", "09:01:01", "bext"), r
+        # began 23:30, closed 01:10 the next day: the recording's date is the day it began
+        _bext_wav(w, odate=b"2026-09-30", otime=b"01:10:00", start_s=23 * 3600 + 1800)
+        assert recording.from_metadata(w)["date"] == "2026-09-29"
+        # a recorder that writes the start, not the close, here: same day despite sub-second rounding
+        _bext_wav(w, odate=b"2026-09-29", otime=b"09:01:01", start_s=9 * 3600 + 61.9)
+        assert recording.from_metadata(w)["date"] == "2026-09-29"
+        # any separator is legal in OriginationDate (EBU Tech 3285)
+        _bext_wav(w, odate=b"2026:09:29")
+        assert recording.from_metadata(w)["date"] == "2026-09-29"
+        # TimeReference 0: no start, and no midnight correction
+        _bext_wav(w, start_s=0)
+        r = recording.from_metadata(w)
+        assert r["date"] == "2026-09-29" and r["start"] is None, r
+        _bext_wav(w, odate=b"")
+        r = recording.from_metadata(w)
+        assert r["date"] is None and "OriginationDate" in r["why"], r
+
+
+@check("recording date: Voice Memos' UTC udta date is converted to the local day")
+def _():
+    from pipeline import recording
+    with tempfile.TemporaryDirectory() as td:
+        m = Path(td) / "a.m4a"
+        _m4a(m, "2026-08-26T21:10:25Z")
+        r = recording.from_metadata(m)
+        assert (r["date"], r["start"], r["from"]) == ("2026-08-26", "14:10:25", "mp4 udta date"), r
+        assert r["as_written"] == "2026-08-26T21:10:25Z" and r["tz"] == recording.RECORDING_TZ
+        _m4a(m, "2026-09-30T02:30:00Z")              # 19:30 in California, already tomorrow in UTC
+        assert recording.from_metadata(m)["date"] == "2026-09-29"
+        _m4a(m, "2026-08-26T21:10:25")               # no offset: its zone is not guessed
+        r = recording.from_metadata(m)
+        assert r["date"] is None and "UTC offset" in r["why"], r
+        _m4a(m)                                      # no udta date at all
+        assert recording.from_metadata(m)["date"] is None
+
+
+@check("recording date: a file without either field has none; a missing file is an error")
+def _():
+    from pipeline import recording
+    with tempfile.TemporaryDirectory() as td:
+        plain = Path(td) / "plain.wav"; _silence(plain, 1)
+        other = Path(td) / "notes.txt"; other.write_text("hello")
+        for p in (plain, other):
+            r = recording.from_metadata(p)
+            assert r["date"] is None and r["why"], r
+        try:
+            recording.from_metadata(Path(td) / "missing.wav")
+        except FileNotFoundError:
+            pass
+        else:
+            raise AssertionError("a missing file is an error, not 'no date'")
+
+
+@check("--recorded_date wins over the metadata, which is kept beside it")
+def _():
+    from pipeline import recording
+    found = {"date": "2026-09-28", "start": "14:08:49", "from": "bext"}
+    r = recording.given_by_hand("2026-09-29", found)
+    assert r["date"] == "2026-09-29" and r["from"] == "--recorded_date" and r["metadata"] == found
+
+
+@check("output names: <stem>-<recorded date>[_seg_<start>][_<tag>], and no job id")
+def _():
+    sys.path.insert(0, str(ROOT / "src"))
+    import transcribe_audio as ta
+    a = ta.build_parser().parse_args(["-i", "data/PSY498-F26-WK6-Tue.wav"])
+    a.recorded = {"date": "2026-09-29"}
+    assert ta.output_basename(a) == "PSY498-F26-WK6-Tue-2026-09-29"
+    a.start_time = "00:45:00"; a.tag = "ARK-ASR-0.6B"
+    assert ta.output_basename(a) == "PSY498-F26-WK6-Tue-2026-09-29_seg_004500_ARK-ASR-0.6B"
+    b = ta.build_parser().parse_args(["-i", "data/PhD-Applications-Discussion-2026-10-07.wav"])
+    b.recorded = {"date": "2026-10-07"}
+    assert ta.output_basename(b) == "PhD-Applications-Discussion-2026-10-07", "date doubled"
+    c = ta.build_parser().parse_args(["-i", "data/PSY777-F26-WK2-Mon.wav"])
+    c.recorded = {"date": None, "why": "no bext"}
+    assert ta.output_basename(c) == "PSY777-F26-WK2-Mon", "no date in the file, none in the name"
+
+
+@check("flags: --job_id is gone; --tag and --recorded_date are checked at parse time")
+def _():
+    import contextlib, io
+    sys.path.insert(0, str(ROOT / "src"))
+    import transcribe_audio as ta
+    a = ta.build_parser().parse_args(["-i", "x.wav", "--tag", "CrisperWhisper2.0_large",
+                                      "--recorded_date", "2026-08-31"])
+    assert (a.tag, a.recorded_date, a.overwrite) == ("CrisperWhisper2.0_large", "2026-08-31", False)
+    for bad in (["--job_id", "123"], ["--tag", "a/b"], ["--tag", "../x"], ["--recorded_date", "08/31/2026"]):
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                ta.build_parser().parse_args(["-i", "x.wav"] + bad)
+        except SystemExit as exc:
+            assert exc.code == 2, bad
+        else:
+            raise AssertionError(f"{bad} was accepted")
+
+
+@check("an existing record is refused before any work (exit 2); the record is untouched")
+def _():
+    import contextlib, io, logging
+    sys.path.insert(0, str(ROOT / "src"))
+    import transcribe_audio as ta
+    with tempfile.TemporaryDirectory() as td:
+        audio = Path(td) / "PSY498-F26-WK6-Tue.wav"; _bext_wav(audio)
+        record = Path(td) / "PSY498-F26-WK6-Tue-2026-09-29_raw.json"; record.write_text("earlier run")
+        argv, sys.argv = sys.argv, ["transcribe_audio.py", "-i", str(audio), "-o", td,
+                                    "--model", "mock/start-end", "--no_diarize"]
+        logging.disable(logging.CRITICAL)
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                ta.main()
+        except SystemExit as exc:
+            assert exc.code == 2, exc.code
+        else:
+            raise AssertionError("ran over an existing record")
+        finally:
+            sys.argv = argv
+            logging.disable(logging.NOTSET)
+        assert record.read_text() == "earlier run"
+        assert sorted(p.name for p in Path(td).iterdir()) == sorted([audio.name, record.name]), \
+            "something was written before the refusal"
+
+
+@check("the source block records when the recording was made")
+def _():
+    from pipeline.orchestrator import _source_block
+    with tempfile.TemporaryDirectory() as td:
+        wav = Path(td) / "x.wav"; _silence(wav, 1)
+        a = _Args(input_path=str(wav))
+        assert "recorded" not in _source_block(a, wav, 1.0)
+        a.recorded = {"date": "2026-09-29", "start": "09:01:01", "from": "bext"}
+        assert _source_block(a, wav, 1.0)["recorded"] == a.recorded
+
+
 # ------------------------------------------------------------ decode once ----
 
 @check("a compressed source is decoded once at the boundary; PCM containers pass through")

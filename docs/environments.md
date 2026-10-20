@@ -111,7 +111,7 @@ LD_LIBRARY_PATH=$HOME/miniforge3/envs/diarizen/lib mamba run -n diarizen python 
 
 ```bash
 # from src/, in cw2native
-python -u transcribe_audio.py -i ../data/PSY582-S26-WK9-Thu.wav -o ../transcripts/out \
+python -u transcribe_audio.py -i ../data/PSY582-S26-WK8-Thu.wav -o ../transcripts/out \
     --start_time 00:45:00 --end_time 00:46:30 --no_diarize --mode verbatim
 ```
 
@@ -129,8 +129,11 @@ from one batched pass on the ct2 backend (~11% more inference than one stream, a
 for a second pass). It writes a second preview file per stream.
 
 Outputs `<name>_raw.json` (schema v1, the record) and `<name>_preview.txt` (a stage-1
-preview, not the stage-2 render). Exit codes: **1** means audio ranges were lost and the
-transcript has holes; **2** means the model id or the requested mode was refused.
+preview, not the stage-2 render), where `<name>` is the audio's stem plus the date it was
+recorded, from its own metadata (D25): `PSY498-F26-WK6-Tue-2026-09-29`. Exit codes: **1** means
+audio ranges were lost and the transcript has holes; **2** means the run was refused before
+any work: an unknown model id, a refused mode, or a record of the same name already in the
+output directory (`--overwrite` replaces it, `--tag` writes beside it).
 
 `python transcribe_audio.py --help` lists the registered model ids. An unregistered id is
 refused rather than guessed at, so a new checkpoint needs a `ModelSpec` in
@@ -172,7 +175,7 @@ the one exception is noted in its row.
 
 | file | duration | notes |
 |---|---|---|
-| `PSY582-S26-WK9-Thu.wav` | 91.7 min | **Was `geisler.wav`.** Lecture, **disfluency-rich**: the reference for verbatim testing. The 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
+| `PSY582-S26-WK8-Thu.wav` | 91.7 min | **Was `geisler.wav`, then `PSY582-S26-WK9-Thu.wav` until 2026-10-19**, when the week was corrected: recorded Thu 2026-04-02, four weeks before WK12 (spring recess was March 23–28). Lecture, **disfluency-rich**: the reference for verbatim testing. The 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
 | `PSY582-S26-WK12-Thu.wav` | 66.8 min | PSY 582, Spring 2026 week 12 Thursday, 2026-04-30. |
 | `PSY498-F26-WK2-Tue.wav`, `-WK4-`, `-WK5-` | 143–146 min | PSY 498, Tuesdays. The long lectures: community-1 splits them into 7–13 speaker labels (§10). |
 | `PSY498-F26-WK3-Tue.wav` | 49.9 min | PSY 498, week 3 Tuesday. |
@@ -183,6 +186,12 @@ the one exception is noted in its row.
 source of `tests/fixtures/golden.json`: a visiting professor presenting their research, with host
 interaction. A copy is on the Mac as `data/Gard_Talk.wav` (`sha256` matches the fixture's record).
 It is *not* a research-participant interview: there is no interview recording in `data/` yet.
+
+**Recording dates (D25).** Stage 1 puts the date a recording was made into its output names,
+read from the file itself. Every Tascam WAV since the recorder was set to BWF carries one (the
+first is `PSY777-F26-WK5-Wed`, 2026-09-23), and both Voice Memos `.m4a` do. The WAVs before
+that carry no date at all, so rerunning one of them needs `--recorded_date YYYY-MM-DD`; without
+it the name has no date and the run warns.
 
 `.env` holds `HF_TOKEN` (mode 600), gitignored, required for pyannote.
 
@@ -223,6 +232,6 @@ Throughput measured on 300 s of audio, A100, correctly configured:
 | `ARK-ASR-0.6B` | 36 | 30 s audio cap → 10 calls per 300 s |
 
 The 12-window sweep used for every comparison: windows at 5/15/30/45/60/75 min, 90 s each,
-across `geisler.wav` (now `PSY582-S26-WK9-Thu.wav`) and `251211_0009.wav`. Outputs land in
+across `geisler.wav` (now `PSY582-S26-WK8-Thu.wav`) and `251211_0009.wav`. Outputs land in
 `transcripts/wide/<tag>__<file>/`. Metrics: word count, disfluency markers, duplicate-8-gram
 rate (loop detection), and cross-model disagreement.

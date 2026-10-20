@@ -197,7 +197,7 @@ instructor, two students).
    full-precision iteration, not the RTTM: the RTTM is rounded to 1 ms, and a near-tie in
    `assign` can be decided by less than that. The 44-word exchange was lost by 5 ms. Turns are
    sorted by (start, end, label). A malformed line is refused, never skipped.
-5. **Swap.** The gold's raw JSON (`transcripts/lectures/PSY777-F26-WK2-Mon_job49864_raw.json`)
+5. **Swap.** The gold's raw JSON (`transcripts/lectures/PSY777-F26-WK2-Mon-2026-08-31_raw.json`)
    is copied:
    - `words`, `secondary_stream` and `text` stay byte-identical;
    - `speaker_turns` is replaced by the arm's turns;
@@ -496,11 +496,16 @@ done
 # transcripts/), then score PSY777 only.
 S=PSY777-F26-WK2-Mon
 python3 scripts/diarization_bakeoff.py score \
-    transcripts/lectures/${S}_job49864_labels.normalized.json \
+    transcripts/lectures/${S}-2026-08-31_labels.normalized.json \
     transcripts/bakeoff/$S/{community1,community1-exclusive,diarizen,sortformer}/run{1,2}/provenance.json \
     --gold-map SPEAKER_01=L,SPEAKER_00=S \
     --out-dir transcripts/bakeoff/$S/scored --json transcripts/bakeoff/$S/bakeoff-score.json
 ```
+
+The gold was `${S}_job49864_labels.normalized.json` when this ran. On 2026-10-19 the PSY777
+set took the D25 names; only the file names written inside the files changed, and the gold regenerates
+byte-identical from its sheet. The frozen `bakeoff-score.json` and `scored/` keep the old names
+and the gold's pre-rename sha256 (`95bf0d6c…`).
 
 `tests/check_bakeoff.py` covers the converters, the map rule, the swap, the identity check,
 the scoring, the bar and the runner's stdlib side. It needs no model and no GPU.
