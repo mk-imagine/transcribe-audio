@@ -650,10 +650,12 @@ def _():
         assert blk["audio_path"].endswith("x.m4a") and blk["transcoded"]["from"] == ".m4a"
 
 
-@check("the two new vocalization tags are recognised; an unseen one is still flagged unknown")
+@check("vocalization tags first seen on real lectures are recognized; an unseen one is still flagged unknown")
 def _():
     assert flags.tag("[throatclearing]") == ("vocalization",)
     assert flags.tag("[lipsmack]") == ("vocalization",)
+    assert flags.tag("[yawn]") == ("vocalization",)
+    assert flags.tag("[YAWN]") == ("vocalization",)
     assert flags.tag("[zzzt]") == ("unknown_marker",)
 
 
