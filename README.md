@@ -96,9 +96,12 @@ the other stream.
 
 **Names (D25):** `<audio stem>-<recorded date>`, e.g. `PSY498-F26-WK6-Tue-2026-09-29_raw.json`.
 The date is when the recording was made, read from the file's own metadata: the BWF `bext`
-chunk the Tascam writes (once set to BWF), or the `udta` date in a Voice Memos `.m4a`. A file
-with neither gets no date in its name, and a warning; WAVs recorded before 2026-09-23 have none.
-A name that already holds the date is not given it twice. An excerpt adds `_seg_<start>`, and
+chunk the Tascam writes (once set to BWF), or the `udta` date in a Voice Memos `.m4a`. A name
+that already holds the date is not given it twice, and `scripts/rename_recordings.py` ends every
+recording's name in its date, so a recording and its transcript share one name:
+`data/PSY498-F26-WK6-Tue-2026-09-29.wav` gives `PSY498-F26-WK6-Tue-2026-09-29_raw.json`. A file
+whose metadata has no date (WAVs recorded before 2026-09-23) warns, and its record's
+`source.recorded` is empty unless `--recorded_date` is given; its name still carries the date. An excerpt adds `_seg_<start>`, and
 `--tag` adds `_<tag>`. The SLURM job id is in the record (`run.slurm_job_id`), not the name.
 
 **Exit codes:** `1` — audio ranges were lost and the transcript has holes (the ranges are in the
@@ -251,9 +254,11 @@ python scripts/rename_recordings.py data/ --apply    # rename
 its term code (`F26`), first and last day, and each course's weekdays and time window. The
 window only decides anything on a day two courses share; Fall 2026 has none. Add each new semester and keep the
 old ones, so an old recording still renames correctly; the script refuses to run if two
-semesters overlap. Names come out as `PSY498-F26-WK3-Tue.wav`, `PSY777-F26-WK3-Mon.wav`,
-`PSY896-F26-WK3-Fri.wav` — code, term, week, weekday, always; the term keeps a course code that
-recurs in a later semester from colliding. Two recordings on one day get `-1`, `-2`. Nothing is
+semesters overlap. Names come out as `PSY498-F26-WK3-Tue-2026-09-08.wav`,
+`PSY777-F26-WK3-Mon-2026-09-07.wav`, `PSY896-F26-WK3-Fri-2026-09-11.wav` — code, term, week,
+weekday and date, always; the term keeps a course code that recurs in a later semester from
+colliding, and the date comes last, as in the transcript names (D25). Two recordings on one day
+get `-1`, `-2` before the date. Nothing is
 ever overwritten, and a file outside every semester or on a day with no class is skipped and
 listed.
 
@@ -278,7 +283,7 @@ python3 tests/check_candidates.py  # 47: the diarization repair candidates, v1 f
 ```
 
 They check dispatch and structure, which is all a unit check can. **Model behaviour is verified
-on real audio**: an `sbatch` run against `data/PSY582-S26-WK8-Thu.wav` (formerly `geisler.wav`) at 45:00–46:30, where the reference
+on real audio**: an `sbatch` run against `data/PSY582-S26-WK8-Thu-2026-04-02.wav` (formerly `geisler.wav`) at 45:00–46:30, where the reference
 expectation is ~10 filled-pause markers with per-word timestamps on every token including the
 markers. This project has been burned three times by a model integration that ran, produced
 plausible output, and was wrong — read a model's own card and package before writing to it.

@@ -6,7 +6,7 @@
 # same call, as the optional arm the plan lists for Mark; that is scored only
 # if he adds it.
 #
-#   sbatch hpc/bakeoff/community1.slurm data/PSY777-F26-WK2-Mon.wav data/PSY498-F26-WK3-Tue.wav
+#   sbatch hpc/bakeoff/community1.slurm data/PSY777-F26-WK2-Mon-2026-08-31.wav data/PSY498-F26-WK3-Tue-2026-09-08.wav
 #
 # Submit from the repo root: --output is relative to it (hpc/README.md). Needs
 # HF_TOKEN (the repo's .env), as stage 1 does: community-1 is gated.

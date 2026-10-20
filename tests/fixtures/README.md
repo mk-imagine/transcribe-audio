@@ -44,10 +44,11 @@ Nothing else was touched; `audio_sha256` is the identity anchor and is unchanged
 
 ## Regenerating
 
-Same window, same flags, from a clean checkout of the recorded commit or later:
+Same window, same flags, from a clean checkout of the recorded commit or later. The recording
+is now on the Mac only, as `data/Gard_Talk-2025-12-11.wav` (same `sha256`):
 
 ```bash
-python src/transcribe_audio.py -i data/251211_0009.wav -o transcripts/golden \
+python src/transcribe_audio.py -i data/Gard_Talk-2025-12-11.wav -o transcripts/golden \
     --start_time 00:05:00 --end_time 00:15:00 --dual_stream --tag golden
 ```
 

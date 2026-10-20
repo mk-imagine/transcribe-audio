@@ -111,7 +111,7 @@ LD_LIBRARY_PATH=$HOME/miniforge3/envs/diarizen/lib mamba run -n diarizen python 
 
 ```bash
 # from src/, in cw2native
-python -u transcribe_audio.py -i ../data/PSY582-S26-WK8-Thu.wav -o ../transcripts/out \
+python -u transcribe_audio.py -i ../data/PSY582-S26-WK8-Thu-2026-04-02.wav -o ../transcripts/out \
     --start_time 00:45:00 --end_time 00:46:30 --no_diarize --mode verbatim
 ```
 
@@ -169,29 +169,32 @@ speaker. Labels are per-recording, so each recording gets its own sidecar.
 
 `~/Repos/transcribe-audio/data/` — human-subjects material, do not copy off-cluster.
 
-Names follow `scripts/rename_recordings.py` (`PSY<course>-<term>-WK<week>-<day>`). Identities
-across renames were checked on 2026-09-22 against the `audio_sha256` stored in earlier records;
-the one exception is noted in its row.
+Names follow `scripts/rename_recordings.py` (`PSY<course>-<term>-WK<week>-<day>-<date>`), and
+match their transcripts' names (D25). Identities across renames were checked on 2026-09-22
+against the `audio_sha256` stored in earlier records; the one exception is noted in its row. On
+2026-10-19 every name gained its recording date, each checked the same way: the recording's
+`sha256` is the one in the record of the transcript whose name it took.
 
 | file | duration | notes |
 |---|---|---|
-| `PSY582-S26-WK8-Thu.wav` | 91.7 min | **Was `geisler.wav`, then `PSY582-S26-WK9-Thu.wav` until 2026-10-19**, when the week was corrected: recorded Thu 2026-04-02, four weeks before WK12 (spring recess was March 23–28). Lecture, **disfluency-rich**: the reference for verbatim testing. The 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
-| `PSY582-S26-WK12-Thu.wav` | 66.8 min | PSY 582, Spring 2026 week 12 Thursday, 2026-04-30. |
-| `PSY498-F26-WK2-Tue.wav`, `-WK4-`, `-WK5-` | 143–146 min | PSY 498, Tuesdays. The long lectures: community-1 splits them into 7–13 speaker labels (§10). |
-| `PSY498-F26-WK3-Tue.wav` | 49.9 min | PSY 498, week 3 Tuesday. |
-| `PSY777-F26-WK2-Mon.wav`, `-WK3-Wed`, `-WK4-Mon`, `-WK4-Wed`, `-WK5-Mon` | 80–94 min | PSY 777, Mondays and Wednesdays. Low-disfluency speaker. `WK2-Mon` was `PSY777-week2-Mon.wav`. |
-| `PSY777-F26-WK1-Wed.m4a`, `-WK2-Wed.m4a` | 79.0, 106.7 min | iPad Voice Memos recordings, the only `.m4a` sources. `WK1-Wed` was `PSY777-week1-Wed.m4a` (originally `tate_1.m4a`): re-exported from Voice Memos on 2026-09-22, so its bytes and `sha256` differ, but it is the same audio (identical duration, and a word-for-word identical transcript). Stage 1 decodes each once to a temporary `.wav` before transcribing (bug 9: pyannote on the `.m4a` directly did not finish in 45 minutes). |
+| `PSY582-S26-WK8-Thu-2026-04-02.wav` | 91.7 min | **Was `geisler.wav`, then `PSY582-S26-WK9-Thu.wav` until 2026-10-19**, when the week was corrected: recorded Thu 2026-04-02, four weeks before WK12 (spring recess was March 23–28). Lecture, **disfluency-rich**: the reference for verbatim testing. The 45:00 window has confirmed `uh`s and the "Courchesne"/"commissure" proper-noun probes. |
+| `PSY582-S26-WK12-Thu-2026-04-30.wav` | 66.8 min | PSY 582, Spring 2026 week 12 Thursday, 2026-04-30. |
+| `PSY498-F26-WK2-Tue-2026-09-01.wav`, `-WK4-Tue-2026-09-15`, `-WK5-Tue-2026-09-22` | 143–146 min | PSY 498, Tuesdays. The long lectures: community-1 splits them into 7–13 speaker labels (§10). |
+| `PSY498-F26-WK3-Tue-2026-09-08.wav` | 49.9 min | PSY 498, week 3 Tuesday. |
+| `PSY777-F26-WK2-Mon-2026-08-31.wav`, `-WK3-Wed-2026-09-09`, `-WK4-Mon-2026-09-14`, `-WK4-Wed-2026-09-16`, `-WK5-Mon-2026-09-21` | 80–94 min | PSY 777, Mondays and Wednesdays. Low-disfluency speaker. `WK2-Mon` was `PSY777-week2-Mon.wav`. |
+| `PSY777-F26-WK1-Wed-2026-08-26.m4a`, `-WK2-Wed-2026-09-02.m4a` | 79.0, 106.7 min | iPad Voice Memos recordings, the only `.m4a` sources. `WK1-Wed` was `PSY777-week1-Wed.m4a` (originally `tate_1.m4a`): re-exported from Voice Memos on 2026-09-22, so its bytes and `sha256` differ, but it is the same audio (identical duration, and a word-for-word identical transcript). Stage 1 decodes each once to a temporary `.wav` before transcribing (bug 9: pyannote on the `.m4a` directly did not finish in 45 minutes). |
 
 **Not on the cluster any more:** `251211_0009.wav` (80.7 min), the **proseminar guest lecture** that is the
 source of `tests/fixtures/golden.json`: a visiting professor presenting their research, with host
-interaction. A copy is on the Mac as `data/Gard_Talk.wav` (`sha256` matches the fixture's record).
+interaction. A copy is on the Mac as `data/Gard_Talk-2025-12-11.wav` (`sha256` matches the fixture's record).
 It is *not* a research-participant interview: there is no interview recording in `data/` yet.
 
-**Recording dates (D25).** Stage 1 puts the date a recording was made into its output names,
-read from the file itself. Every Tascam WAV since the recorder was set to BWF carries one (the
-first is `PSY777-F26-WK5-Wed`, 2026-09-23), and both Voice Memos `.m4a` do. The WAVs before
-that carry no date at all, so rerunning one of them needs `--recorded_date YYYY-MM-DD`; without
-it the name has no date and the run warns.
+**Recording dates (D25).** Stage 1 records the date a recording was made, read from the file
+itself, and puts it in the output names unless the recording's name already holds it. Every
+Tascam WAV since the recorder was set to BWF carries one (the first is
+`PSY777-F26-WK5-Wed-2026-09-23`), and both Voice Memos `.m4a` do. The WAVs before that carry no
+date at all: rerunning one warns and leaves the record's `source.recorded` empty unless
+`--recorded_date YYYY-MM-DD` is given. The name is right either way, since it holds the date.
 
 `.env` holds `HF_TOKEN` (mode 600), gitignored, required for pyannote.
 
@@ -232,6 +235,6 @@ Throughput measured on 300 s of audio, A100, correctly configured:
 | `ARK-ASR-0.6B` | 36 | 30 s audio cap → 10 calls per 300 s |
 
 The 12-window sweep used for every comparison: windows at 5/15/30/45/60/75 min, 90 s each,
-across `geisler.wav` (now `PSY582-S26-WK8-Thu.wav`) and `251211_0009.wav`. Outputs land in
+across `geisler.wav` (now `PSY582-S26-WK8-Thu-2026-04-02.wav`) and `251211_0009.wav`. Outputs land in
 `transcripts/wide/<tag>__<file>/`. Metrics: word count, disfluency markers, duplicate-8-gram
 rate (loop detection), and cross-model disagreement.

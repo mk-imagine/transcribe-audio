@@ -9,7 +9,7 @@ Model routing is the registry's job (`pipeline/registry.py`), not this file's.
 Nothing here inspects a model name to decide what a model can do.
 
     python src/transcribe_audio.py \
-        --input_path data/PSY582-S26-WK8-Thu.wav \
+        --input_path data/PSY582-S26-WK8-Thu-2026-04-02.wav \
         --output_dir transcripts/ \
         --model nyralabs/CrisperWhisper2.0_large \
         --mode verbatim
