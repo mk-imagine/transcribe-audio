@@ -21,11 +21,13 @@ _FILLED_PAUSE = {
     "uh", "um", "uhm", "hm", "hmm", "mm", "mhm", "er", "erm", "ah", "eh", "huh",
 }
 # Seen from CrisperWhisper 2 on real lectures: [laughter] (2026-08-31),
-# [throatclearing] and [lipsmack] (2026-09-02, both first flagged unknown_marker
-# by the guard below, which is the guard doing its job).
+# [throatclearing] and [lipsmack] (2026-09-02), [yawn] (2026-10-07 lecture, job
+# 51667). Each was first flagged unknown_marker by the guard below, which is the
+# guard doing its job.
 _VOCALIZATION = {
     "laughter", "laugh", "laughs", "cough", "coughs", "breath", "breathing",
-    "sigh", "sighs", "sniff", "throat", "clears throat", "throatclearing",
+    "sigh", "sighs", "yawn", "yawns", "yawning",
+    "sniff", "throat", "clears throat", "throatclearing",
     "throat clearing", "throat-clearing", "lipsmack", "lip smack", "lip-smack",
     "applause", "music", "noise", "silence", "inaudible", "unintelligible", "crosstalk",
 }

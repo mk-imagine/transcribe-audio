@@ -244,8 +244,9 @@ categories appear in real output:
 
 Tag inventory over those 12 windows is exactly `{uh: 83, um: 38, laughter: 1}`. Vocalizations
 are supported but rare in this material; an uppercase-only regex will miss them. Two full
-lectures on 2026-09-02 added `[throatclearing]` and `[lipsmack]` — first caught as
-`unknown_marker` by the guard, then added to the vocalization set. The inventory is open-ended;
+lectures on 2026-09-02 added `[throatclearing]` and `[lipsmack]`, and the 2026-10-07 lecture
+`[yawn]` — each first caught as `unknown_marker` by the guard, then added to the
+vocalization set. The inventory is open-ended;
 the guard is what keeps a new tag from passing as speech.
 
 `word_timestamps=True` and the markers coexist. `temperature_fallback=True` is
